@@ -762,10 +762,32 @@ def cache_path() -> Path:
     return paths.data_dir() / CACHE_NAME
 
 
+#: Cache w pamieci: sciezka pliku -> (mtime pliku, max_age, lista aplikacji).
+#: Odczyt z dysku przy kazdym wpisaniu litery w wyszukiwarce byl zauwazalny,
+#: a plik i tak zmienia sie tylko po pelnym skanie.
+_MEM_CACHE: dict[str, tuple[float, float, list["CatalogApp"]]] = {}
+
+
+def _remember(file: Path, max_age: float, apps: list["CatalogApp"]) -> None:
+    try:
+        mtime = file.stat().st_mtime
+    except OSError:
+        return
+    _MEM_CACHE[str(file)] = (float(mtime), float(max_age), list(apps))
+
+
 def load_cache(max_age: float = CACHE_TTL_SECONDS) -> Optional[list[CatalogApp]]:
     file = cache_path()
     if not file.exists():
+        _MEM_CACHE.pop(str(file), None)
         return None
+    try:
+        mtime = file.stat().st_mtime
+    except OSError:
+        return None
+    memo = _MEM_CACHE.get(str(file))
+    if memo is not None and memo[0] == float(mtime) and memo[1] == float(max_age):
+        return list(memo[2]) or None
     try:
         payload = json.loads(file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -784,6 +806,8 @@ def load_cache(max_age: float = CACHE_TTL_SECONDS) -> Optional[list[CatalogApp]]
         for item in payload.get("apps") or []
         if item.get("name")
     ]
+    if apps:
+        _remember(file, max_age, apps)
     return apps or None
 
 
@@ -795,7 +819,8 @@ def save_cache(apps: Sequence[CatalogApp]) -> None:
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
         tmp.replace(file)
     except OSError:
-        pass
+        return
+    _remember(file, CACHE_TTL_SECONDS, list(apps))
 
 
 def get_catalog(

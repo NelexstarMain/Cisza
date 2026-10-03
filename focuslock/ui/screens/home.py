@@ -28,11 +28,13 @@ PRESETS_EMPTY_DETAIL = "Zbuduj plan w kreatorze sesji i zapisz go jako preset."
 class HomeScreen(Screen):
     """Punkt wyjscia: jedna decyzja — rozpoczac sesje."""
 
-    TITLE = "KARTA STARTOWA"
+    TITLE = "START"
 
     # ------------------------------------------------------------------ budowa
     def _build(self) -> None:
-        self._status = labels.caption("GOTOWY DO NAUKI")
+        # Bez napisu "GOTOWY DO NAUKI": naglowek pokazuje tylko to, czego nie
+        # widac gdzie indziej - poziom kontroli nad systemem (albo faze sesji).
+        self._status = labels.caption("KONTROLA: PODSTAWOWA")
         self.header_widget(self._status)
 
         body = self.make_scroll_body(spacing=16)
@@ -43,12 +45,14 @@ class HomeScreen(Screen):
         self._start_card = Card()
         self._timer = labels.timer_label("25:00")
         self._timer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._plan_caption = labels.caption("PLAN: 25 MIN NAUKI · 5 MIN PRZERWY")
+        self._plan_caption = labels.caption("25 MIN NAUKI · 5 MIN PRZERWY")
         self._plan_caption.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._goal = labels.body("Ustaw cel sesji, żeby wiedzieć, po co siadasz.")
+        self._goal = labels.body("")
         self._goal.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._tag = labels.elided("BEZ TAGU", role="caption")
+        self._goal.setVisible(False)
+        self._tag = labels.elided("", role="caption")
         self._tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._tag.setVisible(False)
         self._start_button = PrimaryButton("ROZPOCZNIJ SESJĘ")
         self._start_button.clicked.connect(lambda: self.emit_start(self._plan))
         self._free_button = GhostButton("TRYB WOLNY (Z BANKU)")
@@ -129,14 +133,16 @@ class HomeScreen(Screen):
         else:
             study_minutes = as_int(self._plan.get("study_minutes"), 25)
             self._timer.setText(charts.fmt_clock(study_minutes * 60))
-            self._status.setText(f"GOTOWY DO NAUKI · {control}")
+            self._status.setText(control)
 
         tag = str(self._plan.get("tag") or "")
-        self._tag.set_full_text(f"TAG: {tag.upper()}" if tag else "BEZ TAGU")
-        goal = str(self._plan.get("goal_note") or "")
-        self._goal.setText(goal or "Ustaw cel sesji, żeby wiedzieć, po co siadasz.")
+        self._tag.set_full_text(tag.upper())
+        self._tag.setVisible(bool(tag))
+        goal = str(self._plan.get("goal_note") or "").strip()
+        self._goal.setText(goal)
+        self._goal.setVisible(bool(goal))
         self._plan_caption.setText(
-            f"PLAN: {as_int(self._plan.get('study_minutes'), 25)} MIN NAUKI · "
+            f"{as_int(self._plan.get('study_minutes'), 25)} MIN NAUKI · "
             f"{as_int(self._plan.get('break_minutes'), 5)} MIN PRZERWY"
         )
         self._start_button.setEnabled(not running)

@@ -44,6 +44,17 @@ def ui_font(size: int, weight: int = 400) -> QFont:
     return font
 
 
+def display_font(size: int, weight: int = 600) -> QFont:
+    """Czcionka naglowkow (Display); spada na kroj tekstowy, gdy go nie ma."""
+    font = QFont()
+    font.setFamilies(
+        [TYPO.display_family, TYPO.display_fallback, TYPO.ui_family, TYPO.ui_fallback, "Arial", "sans-serif"]
+    )
+    font.setPixelSize(max(8, int(size)))
+    font.setWeight(_weight(weight))
+    return font
+
+
 def mono_font(size: int, weight: int = 300) -> QFont:
     """Czcionka o stalej szerokosci (timer, wartosci) z fallbackiem (Consolas)."""
     font = QFont()

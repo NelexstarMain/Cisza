@@ -16,12 +16,21 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidg
 from ..theme import FONT_SIZES, ROLE_FONTS, TYPO
 
 
+#: Role, ktore rysujemy krojem naglowkowym (Display) - spojne z `theme.qss()`.
+DISPLAY_ROLES = frozenset({"title", "subtitle", "primary"})
+
+
 def _role_font(role: str) -> QFont:
     """Czcionka zgodna z QSS dla roli tekstu (rozmiar + rozstrzelenie + krój)."""
-    from .paint import mono_font, ui_font
+    from .paint import display_font, mono_font, ui_font
 
     size, spacing, mono = ROLE_FONTS.get(role, ROLE_FONTS["button"])
-    font = mono_font(size, 300) if mono else ui_font(size)
+    if mono:
+        font = mono_font(size, 300)
+    elif role in DISPLAY_ROLES:
+        font = display_font(size, 600)
+    else:
+        font = ui_font(size)
     font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, float(spacing))
     return font
 

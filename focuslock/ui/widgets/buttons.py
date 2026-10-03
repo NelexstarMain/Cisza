@@ -1,8 +1,17 @@
 """Przyciski i przelacznik: wylacznie tokeny motywu."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QPainter
+from PyQt6.QtCore import (
+    QEasingCurve,
+    QPointF,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Qt,
+    pyqtProperty,
+    pyqtSignal,
+)
+from PyQt6.QtGui import QBrush, QLinearGradient, QPainter, QPainterPath
 from PyQt6.QtWidgets import QAbstractButton, QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
 from ..theme import FONT_SIZES, SIZES, TYPO
@@ -121,17 +130,30 @@ class Toggle(QAbstractButton):
 
 
 class ChoiceGroup(QWidget):
-    """Segmentowany wybor jednej opcji (uzywany w statystykach i ekonomii)."""
+    """Segmentowany wybor jednej opcji z plynna pigulka pod wyborem.
+
+    Tlo maluje sam widget (`paintEvent` rysuje kapsule), a przyciski sa tylko
+    tekstem. Przy zmianie wyboru pigulka przejezdza z animacja i lekko sie
+    rozciaga - ten sam efekt "gooey", co w pasku nawigacji.
+    """
 
     changed = pyqtSignal(str)
+
+    ANIM_MS = 220
 
     def __init__(self, options: list[tuple[str, str]] | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._layout = QHBoxLayout(self)
-        self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.setSpacing(6)
+        self._layout.setContentsMargins(3, 3, 3, 3)
+        self._layout.setSpacing(4)
         self._buttons: dict[str, GhostButton] = {}
         self._value = ""
+        self._blob = 0.0
+        self._target = 0.0
+        self._ready = False
+        self._animation = QPropertyAnimation(self, b"blob", self)
+        self._animation.setDuration(self.ANIM_MS)
+        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.set_options(options or [])
 
     def set_options(self, options: list[tuple[str, str]]) -> None:
@@ -143,14 +165,17 @@ class ChoiceGroup(QWidget):
         self._buttons.clear()
         for key, label in options:
             button = GhostButton(label)
+            button.setMinimumHeight(SIZES["chip"])
+            self._style_button(button)
             button.setCheckable(True)
             button.clicked.connect(lambda _checked=False, k=key: self.set_value(k, emit=True))
             self._layout.addWidget(button)
             self._buttons[key] = button
         self._layout.addStretch(1)
+        self._ready = False
         if options and self._value not in self._buttons:
             self._value = options[0][0]
-        self._refresh()
+        self._refresh(animate=False)
 
     def value(self) -> str:
         return self._value
@@ -160,10 +185,113 @@ class ChoiceGroup(QWidget):
             return
         changed = key != self._value
         self._value = key
-        self._refresh()
+        self._refresh(animate=changed)
         if emit and changed:
             self.changed.emit(key)
 
-    def _refresh(self) -> None:
+    @staticmethod
+    def _style_button(button: GhostButton) -> None:
+        from ..theme import RADIUS, c
+
+        button.setStyleSheet(
+            "QPushButton {"
+            " background: transparent;"
+            " border: 1px solid transparent;"
+            f" border-radius: {RADIUS['md']}px;"
+            f" color: {c('text_dim')};"
+            " padding: 6px 14px;"
+            " letter-spacing: 0.5px;"
+            "}"
+            f"QPushButton:hover {{ color: {c('text')}; }}"
+            f"QPushButton:checked {{ color: {c('text')}; font-weight: 600; }}"
+            f"QPushButton:focus {{ border-color: {c('line_strong')}; }}"
+        )
+
+    def _refresh(self, *, animate: bool = True) -> None:
         for key, button in self._buttons.items():
             button.setChecked(key == self._value)
+        button = self._buttons.get(self._value)
+        if button is None:
+            self.update()
+            return
+        self._target = float(button.geometry().center().x())
+        if not self._ready:
+            self._ready = True
+            self._animation.stop()
+            self._blob = self._target
+            self.update()
+            return
+        if not animate or abs(self._target - self._blob) < 1.0:
+            self._animation.stop()
+            self._blob = self._target
+            self.update()
+            return
+        self._animation.stop()
+        self._animation.setStartValue(float(self._blob))
+        self._animation.setEndValue(self._target)
+        self._animation.start()
+
+    # ------------------------------------------------------- wlasciwosc animacji
+    def _get_blob(self) -> float:
+        return float(self._blob)
+
+    def _set_blob(self, value: float) -> None:
+        self._blob = float(value)
+        self.update()
+
+    blob = pyqtProperty(float, fget=_get_blob, fset=_set_blob)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        super().resizeEvent(event)
+        button = self._buttons.get(self._value)
+        if button is None:
+            return
+        self._animation.stop()
+        self._target = float(button.geometry().center().x())
+        self._blob = self._target
+        self.update()
+
+    # -------------------------------------------------------------- malowanie
+    def _pill_path(self, button: GhostButton) -> QPainterPath:
+        geometry = button.geometry()
+        width = float(geometry.width())
+        height = float(geometry.height())
+        top = float(geometry.top())
+        radius = height / 2.0
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self._blob - width / 2.0, top, width, height), radius, radius)
+        gap = self._target - self._blob
+        if abs(gap) < 2.0:
+            return path
+        target = QPainterPath()
+        target.addRoundedRect(QRectF(self._target - width / 2.0, top, width, height), radius, radius)
+        left = min(self._blob, self._target)
+        right = max(self._blob, self._target)
+        neck_height = height * 0.62
+        neck = QPainterPath()
+        neck.addRoundedRect(
+            QRectF(left, top + (height - neck_height) / 2.0, right - left, neck_height),
+            neck_height / 2.0,
+            neck_height / 2.0,
+        )
+        return path.united(neck).united(target)
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        button = self._buttons.get(self._value)
+        if button is None:
+            return
+        geometry = button.geometry()
+        height = float(max(12, geometry.height()))
+        top = float(geometry.top())
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        gradient = QLinearGradient(QPointF(0.0, top), QPointF(0.0, top + height))
+        gradient.setColorAt(0.0, qcolor("surface3"))
+        gradient.setColorAt(1.0, qcolor("surface2"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(gradient))
+        painter.drawPath(self._pill_path(button))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(pen("line_strong"))
+        painter.drawPath(self._pill_path(button))
+        painter.end()

@@ -60,6 +60,10 @@ class Controller:
         self.last_events: list[dict] = []
         self.last_guard_stats: dict = {}
         self._free_budget = 0
+        #: Sesja, ktora zostala juz rozliczona (`session_finished` poszedl raz).
+        #: Bez tego `tick()` po fazie DONE wolal `_finish` co sekunde i ekran
+        #: podsumowania wracal po kazdym zamknieciu.
+        self._finished_session_id: Optional[int] = None
         self._watchdog_proc: Optional[subprocess.Popen] = None
 
         economy_mod = _try_import("focuslock.economy")
@@ -269,6 +273,7 @@ class Controller:
             hardcore=hardcore,
         )
         state = self.engine.start(plan, session_id)
+        self._finished_session_id = None
         report = self._lockdown(plan, session_id)
         self.store.add_event(session_id, "SESSION_START", {"plan": self._plan_dict(plan), "hardcore": hardcore})
         self._emit("session_started", {"session_id": session_id, "state": state})
@@ -295,6 +300,7 @@ class Controller:
         spent = self.economy.spend_free(seconds, session_id) if self.economy else 0
         self._free_budget = seconds
         state = self.engine.start(plan, session_id)
+        self._finished_session_id = None
         self._release(session_id, reason="free_start")  # tryb wolny = bez lockdownu
         self.store.add_event(session_id, "FREE_START", {"seconds": seconds, "spent": spent})
         self._emit("free_started", {"session_id": session_id, "spent": spent, "state": state})
@@ -357,7 +363,9 @@ class Controller:
                 self.log("filtr paska zadan: " + "; ".join(str(e) for e in result["errors"])[:200])
         self._collect_guard_events()
         self._emit("tick", state)
-        if state.get("phase") == "DONE":
+        if state.get("phase") == "DONE" and state.get("session_id") != self._finished_session_id:
+            # Faza DONE zostaje w silniku (ekran podsumowania jej uzywa), wiec bez
+            # tego warunku kazdy kolejny tick rozliczal te sama sesje jeszcze raz.
             self._finish(state.get("finish_reason") or "auto")
         return state
 
@@ -744,6 +752,11 @@ class Controller:
         if self.engine is None:
             return {"ok": False, "errors": ["brak sesji"]}
         session_id = self._session_id()
+        if session_id is not None and session_id == self._finished_session_id:
+            # Ta sesja jest juz rozliczona - powtorka wyslalaby drugie
+            # `session_finished` (i drugie okno podsumowania).
+            return {"ok": True, "already_finished": True, "session_id": session_id}
+        self._finished_session_id = session_id
         # UWAGA: engine.finish() zeruje licznik i budzet wolnego czasu,
         # dlatego metryki sesji czytamy PRZED zamknieciem silnika.
         before = dict(self.engine.state())
@@ -862,7 +875,18 @@ class Controller:
                 force = bool(payload.get("force")) or action in ("refresh_apps", "installed_apps")
                 query = str(payload.get("query", "") or "").strip()
                 limit = int(payload.get("limit", 0) or 0)
-                apps = appcatalog.search(query, appcatalog.get_catalog(force=force))
+                warming = False
+                if force:
+                    catalog = appcatalog.get_catalog(force=True)
+                else:
+                    # Zapytania z UI (wpisanie frazy, wejscie w kreator) nie moga
+                    # skanowac dysku: pelny skan Start Menu trwa kilkanascie sekund
+                    # i zamrazal okno. Cache buduje akcja `refresh_apps` w watku.
+                    catalog = appcatalog.load_cache()
+                    if catalog is None:
+                        catalog = []
+                        warming = True
+                apps = appcatalog.search(query, catalog)
                 if limit > 0:
                     apps = apps[:limit]
                 return {
@@ -871,6 +895,7 @@ class Controller:
                     "count": len(apps),
                     "query": query,
                     "cached": not force,
+                    "warming": warming,
                     "summary": appcatalog.describe(apps),
                 }
 

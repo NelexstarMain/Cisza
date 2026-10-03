@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ..icons import ICONS
 from ..theme import SIZES
 from ..widgets import (
     AppTile,
@@ -52,8 +51,16 @@ APP_FILTERS = (
 TILE_WIDTH = 172
 TILE_MIN_WIDTH = 140
 
+#: Ile kafli budujemy w jednej porcji (start i doładowanie ze scrolla).
+APP_BATCH = 60
+#: Odległość od dołu przewijania, przy której doładowujemy kolejną porcję.
+APP_SCROLL_MARGIN = 24
+
 APPS_EMPTY = "Brak aplikacji do pokazania"
 APPS_EMPTY_DETAIL = "Zmień frazę w wyszukiwarce albo odśwież listę katalogu."
+APPS_WARM = "KATALOG APLIKACJI UKŁADA SIĘ W TLE…"
+APPS_WARM_DETAIL = "Pełna lista dojedzie sama — możesz w międzyczasie szukać po nazwie."
+APPS_WARM_FILTER_DETAIL = "Szukanie działa na tym, co już jest; reszta dojedzie po skanie w tle."
 SITES_EMPTY = "Brak stron do pokazania"
 SITES_EMPTY_DETAIL = "Zmień szukaną frazę albo dodaj host ręcznie."
 BLOCKED_EMPTY_DETAIL = "Zmień frazę albo przywróć domyślną listę rozpraszaczy."
@@ -77,6 +84,12 @@ class ComposerScreen(Screen):
         self._app_columns = 5
         self._app_tile_width = TILE_WIDTH
         self._apps_busy = False
+        #: Porcjowanie kafli + sygnatura widoku (brak zbednych przebudow = brak migotania).
+        self._app_visible = APP_BATCH
+        self._app_signature: tuple | None = None
+        #: Katalog buduje sie w tle; `refresh_apps` wolno zlecic tylko raz.
+        self._app_warming = True
+        self._app_warm_requested = False
         self._selected_apps: dict[str, dict] = {}
         self._site_catalog: dict[str, list[dict]] = {STUDY: [], BLOCKED: []}
         self._site_query = {STUDY: "", BLOCKED: ""}
@@ -108,7 +121,8 @@ class ComposerScreen(Screen):
         self._seed_selection()
         self._update_app_selection_ui()
         self._update_site_selection_ui()
-        self._request_apps()
+        # Uwaga: _build() nie pobiera katalogu aplikacji. Skan katalogu (PowerShell,
+        # rejestr) blokowalby watek GUI przy starcie; katalog idzie w tle z showEvent.
         self._request_sites(STUDY)
 
     # ------------------------------------------------------------ krok 1: aplikacje
@@ -141,7 +155,7 @@ class ComposerScreen(Screen):
         filters.addStretch(1)
         card.add_layout(filters)
 
-        self._app_empty = EmptyState(APPS_EMPTY, APPS_EMPTY_DETAIL, margins=(18, 14, 18, 14))
+        self._app_empty = EmptyState(APPS_WARM, APPS_WARM_DETAIL, margins=(18, 14, 18, 14))
         self._app_empty.setMinimumHeight(64)
         card.add(self._app_empty)
 
@@ -157,7 +171,14 @@ class ComposerScreen(Screen):
         self._app_scroll.setWidget(self._app_grid_host)
         self._app_scroll.setMinimumHeight(100)
         self._app_scroll.setVisible(False)
+        self._app_scroll.verticalScrollBar().valueChanged.connect(self._on_app_scrolled)
         card.body.addWidget(self._app_scroll, 1)
+
+        # Partie: pierwsze 60 kafli od razu, reszta po kliknieciu albo dojechaniu do konca.
+        self._app_more = GhostButton("POKAŻ WIĘCEJ")
+        self._app_more.clicked.connect(self._show_more_apps)
+        self._app_more.setVisible(False)
+        card.add(self._app_more)
 
         self._app_selected_caption = labels.caption("WYBRANO: 0")
         card.add(self._app_selected_caption)
@@ -360,10 +381,18 @@ class ComposerScreen(Screen):
     # ------------------------------------------------------------------ kroki
     def _sync_step(self) -> None:
         self._stack.setCurrentIndex(self._step)
-        self.set_page_title(f"KROK {self._step + 1} Z 3 — {self.STEPS[self._step]}")
-        self._markers.setText(" ".join("▣" if index <= self._step else "□" for index in range(3)))
+        # Tytul strony jest staly; numer kroku niesie czytelny znacznik, a nazwa
+        # kroku mieszka w naglowku karty (bez potrojonej informacji w naglowku).
+        self.set_page_title(self.TITLE)
+        self._markers.setText(self._step_markers())
         self._back.setEnabled(self._step > 0)
         self._next.setText("ROZPOCZNIJ SESJĘ" if self._step == 2 else "DALEJ")
+
+    def _step_markers(self) -> str:
+        """Czytelny znacznik kroku: „KROK 1/3" + wypelnione/niepuste kwadraty."""
+        total = len(self.STEPS)
+        glyphs = " ".join("▣" if index <= self._step else "□" for index in range(total))
+        return f"KROK {self._step + 1}/{total}  {glyphs}"
 
     def _go_back(self) -> None:
         self._step = max(0, self._step - 1)
@@ -466,36 +495,130 @@ class ComposerScreen(Screen):
         width = (available - max(0, columns - 1) * 8) // max(1, columns)
         return max(TILE_MIN_WIDTH, min(TILE_WIDTH, int(width)))
 
-    def _rebuild_app_grid(self) -> None:
+    def _rebuild_app_grid(self, *, reset: bool = True) -> None:
+        """Buduje widoczna porcje kafli; identyczny widok tylko aktualizuje stan.
+
+        `reset=False` dokłada kolejna porcje bez czyszczenia siatki (scroll/„POKAŻ WIĘCEJ").
+        """
         if not hasattr(self, "_app_grid"):
             return
-        clear_layout(self._app_grid)
-        self._app_tiles = {}
         apps = self._filtered_apps()
         icon_size, gray = self._icon_prefs()
         columns = self._app_columns_for_width()
         tile_width = self._app_tile_width_for(columns)
+        signature = (
+            tuple(self._app_key(app) for app in apps),
+            icon_size,
+            gray,
+            columns,
+            tile_width,
+        )
+        if reset and self._app_tiles and signature == self._app_signature:
+            # Ten sam widok: aktualizujemy tylko stan istniejacych kafli (brak migotania).
+            self._apply_app_grid_state(apps)
+            return
+        if reset or signature != self._app_signature:
+            clear_layout(self._app_grid)
+            self._app_tiles = {}
+            self._app_visible = APP_BATCH
         self._app_columns = columns
         self._app_tile_width = tile_width
-        for index, app in enumerate(apps[:300]):
+        self._app_signature = signature
+        self._append_app_tiles(apps, columns, tile_width, icon_size, gray)
+        self._apply_app_grid_state(apps)
+
+    def _append_app_tiles(
+        self,
+        apps: list[dict],
+        columns: int,
+        tile_width: int,
+        icon_size: int,
+        gray: bool,
+    ) -> None:
+        """Dokłada kafle do limitu `_app_visible`; ikony tylko dla budowanych kafli."""
+        limit = min(len(apps), max(APP_BATCH, int(self._app_visible)))
+        for index in range(limit):
+            app = apps[index]
             key = self._app_key(app)
-            if not key:
+            if not key or key in self._app_tiles:
                 continue
             tile = AppTile(
                 key,
                 str(app.get("name") or key),
                 str(app.get("exe") or ""),
-                ICONS.pixmap(str(app.get("icon_path") or app.get("path") or ""), icon_size, gray),
-                icon_size,
+                icon_size=icon_size,
                 width=tile_width,
+                icon_path=str(app.get("icon_path") or app.get("path") or ""),
+                gray=gray,
             )
             tile.set_selected(key in self._selected_apps)
             tile.clicked.connect(self._toggle_app)
+            tile.ensure_icon()
             self._app_grid.addWidget(tile, index // columns, index % columns)
             self._app_tiles[key] = tile
-        self._app_empty.setVisible(not apps)
-        self._app_scroll.setVisible(bool(apps))
-        self._app_count.setText(f"ZNALEZIONO: {len(apps)}")
+        self._app_visible = limit
+
+    def _apply_app_grid_state(self, apps: list[dict]) -> None:
+        """Odswieza zaznaczenie, pusty stan, licznik i widocznosc „POKAŻ WIĘCEJ"."""
+        for key, tile in self._app_tiles.items():
+            tile.set_selected(key in self._selected_apps)
+        if apps:
+            self._app_empty.setVisible(False)
+            self._app_scroll.setVisible(True)
+            self._app_count.setText(f"ZNALEZIONO: {len(apps)}")
+        elif self._app_warming:
+            # Katalog jeszcze sie uklada - nie pokazujemy falszywego "0 aplikacji".
+            self._show_app_warming(bool(self._app_query))
+        else:
+            self._show_app_catalog_empty()
+        self._sync_app_more(len(apps))
+
+    def _show_app_warming(self, filtered: bool = False) -> None:
+        self._app_empty.set_text(APPS_WARM)
+        self._app_empty.set_detail(APPS_WARM_FILTER_DETAIL if filtered else APPS_WARM_DETAIL)
+        self._app_empty.setVisible(True)
+        self._app_scroll.setVisible(False)
+        self._app_count.setText("")
+
+    def _show_app_catalog_empty(self) -> None:
+        self._app_empty.set_text(APPS_EMPTY)
+        self._app_empty.set_detail(APPS_EMPTY_DETAIL)
+        self._app_empty.setVisible(True)
+        self._app_scroll.setVisible(False)
+        self._app_count.setText("ZNALEZIONO: 0")
+
+    def _sync_app_more(self, total: int) -> None:
+        remaining = max(0, int(total) - int(self._app_visible))
+        self._app_more.setVisible(bool(total) and remaining > 0)
+        if remaining > 0:
+            self._app_more.setText(f"POKAŻ WIĘCEJ ({remaining})")
+
+    def _show_more_apps(self) -> None:
+        """Dokłada kolejna porcje kafli (klik „POKAŻ WIĘCEJ" albo dojazd do konca)."""
+        if not hasattr(self, "_app_grid"):
+            return
+        apps = self._filtered_apps()
+        if self._app_visible >= len(apps):
+            self._sync_app_more(len(apps))
+            return
+        self._app_visible = min(len(apps), int(self._app_visible) + APP_BATCH)
+        icon_size, gray = self._icon_prefs()
+        self._append_app_tiles(apps, self._app_columns, self._app_tile_width, icon_size, gray)
+        self._apply_app_grid_state(apps)
+
+    def _on_app_scrolled(self, value: int) -> None:
+        bar = self._app_scroll.verticalScrollBar()
+        if bar.maximum() <= 0:
+            return
+        if int(value) >= bar.maximum() - APP_SCROLL_MARGIN:
+            self._show_more_apps()
+
+    def _request_catalog_warm(self) -> None:
+        """Jednorazowo zleca uzupelnienie katalogu w tle (akcja HEAVY -> watek)."""
+        if self._app_warm_requested:
+            return
+        self._app_warm_requested = True
+        self._refresh_apps()
 
     def _toggle_app(self, key: str) -> None:
         key = str(key)
@@ -853,9 +976,13 @@ class ComposerScreen(Screen):
 
     def showEvent(self, event) -> None:  # noqa: N802 (API Qt)
         super().showEvent(event)
-        if not self._app_tiles:
+        if not self._app_tiles and not self._app_catalog:
+            # Tylko cache: `catalog_apps` bez `force` nigdy nie skanuje w watku GUI.
+            # Pelny skan zleca jednorazowo dopiero odpowiedz "warming" (w tle, HEAVY).
             self._request_apps()
             self._request_sites(STUDY)
+            if self._app_warming:
+                self._show_app_warming(bool(self._app_query))
 
     def render(self, data: dict) -> None:
         settings = as_dict(data.get("settings"))
@@ -903,7 +1030,7 @@ class ComposerScreen(Screen):
     def on_action_result(self, action: str, result: dict) -> None:
         data = as_dict(result)
         if action in ("catalog_apps", "refresh_apps", "installed_apps"):
-            self._handle_apps(data)
+            self._handle_apps(data, action)
         elif action in ("catalog_sites", "refresh_sites"):
             self._handle_sites(data)
         elif action == "save_app_selection":
@@ -931,16 +1058,36 @@ class ComposerScreen(Screen):
         if action in ("catalog_apps", "refresh_apps", "installed_apps"):
             self._set_apps_busy(bool(busy))
 
-    def _handle_apps(self, data: dict) -> None:
+    def _handle_apps(self, data: dict, action: str = "catalog_apps") -> None:
         if data.get("apps") is None:
+            # Kontrakt przewiduje "apps": [], ale nie polegamy na tym: sam sygnal
+            # warming wystarczy, zeby pokazac stan w tle i raz zlecic skan.
+            if action == "catalog_apps" and data.get("warming"):
+                self._app_warming = True
+                self._show_app_warming(bool(self._app_query))
+                self._request_catalog_warm()
             return
         query = str(data.get("query") or "")
         if query and query != self._app_query:
             return  # wynik nieaktualnego zapytania
         self._app_catalog = [as_dict(app) for app in as_list(data.get("apps"))]
+        # Tylko odpowiedz cache-only moze oznaczac "katalog uklada sie w tle".
+        warming = bool(data.get("warming")) and action == "catalog_apps"
+        if (
+            action == "catalog_apps"
+            and not warming
+            and not self._app_catalog
+            and query == ""
+            and not data.get("cached", False)
+        ):
+            warming = True
+        self._app_warming = warming
         self._set_apps_busy(False)
         self._rebuild_app_grid()
-        if not data.get("cached") and query == "":
+        if warming:
+            self._request_catalog_warm()
+            self._app_status.setText("SKAN W TLE…")
+        elif not data.get("cached") and query == "":
             self._app_status.setText(f"KATALOG ODŚWIEŻONY ({len(self._app_catalog)})")
 
     def _handle_sites(self, data: dict) -> None:

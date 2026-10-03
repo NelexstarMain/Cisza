@@ -29,39 +29,42 @@ COLORS: dict[str, str] = {
 }
 
 SPACING = {"xs": 4, "sm": 8, "md": 16, "lg": 24, "xl": 40, "xxl": 64}
-RADIUS = {"sm": 4, "md": 8, "lg": 14, "xl": 22}
+RADIUS = {"sm": 6, "md": 10, "lg": 14, "xl": 22}
 FONT_SIZES = {
     "xs": 11,
     "sm": 12,
-    "body": 13,
+    "body": 14,
     "md": 14,
-    "lg": 18,
-    "xl": 24,
-    "xxl": 34,
-    "timer": 96,
-    "timer_small": 48,
+    "lg": 17,
+    "xl": 22,
+    "xxl": 30,
+    "timer": 88,
+    "timer_small": 44,
 }
 
 #: Wspolne wysokosci kontrolek - pola, przyciski i chipy w jednym rytmie.
-SIZES = {"input": 38, "button": 38, "primary": 48, "chip": 32, "toggle": 28}
+SIZES = {"input": 40, "button": 38, "primary": 48, "chip": 30, "toggle": 28}
 
 #: Rozmiar, rozstrzelenie liter i krój dla rol tekstu.
 #: Te same wartosci sa w `qss()`, ale Qt nie widzi rozstrzelenia w metrykach
 #: czcionki, wiec elidowanie tekstu (`widgets.labels.elide_text`) musi znac je
 #: jawnie - inaczej dlugi tekst jest przycinany zamiast konczyc sie wielokropkiem.
 #: (rozmiar_px, rozstrzelenie_px, czy_mono)
+#:
+#: Rozstrzelenie jest delikatne (wczesniej 6 px na tytule i 2 px na podpisach) -
+#: mocny tracking to najczestszy "sztuczny" akcent w interfejsie.
 ROLE_FONTS: dict[str, tuple[int, float, bool]] = {
-    "title": (FONT_SIZES["xxl"], 6.0, False),
-    "subtitle": (FONT_SIZES["lg"], 2.0, False),
-    "caption": (FONT_SIZES["sm"], 2.0, False),
+    "title": (FONT_SIZES["xxl"], 1.6, False),
+    "subtitle": (FONT_SIZES["lg"], 0.6, False),
+    "caption": (FONT_SIZES["sm"], 1.0, False),
     "body": (FONT_SIZES["body"], 0.0, False),
     "hint": (FONT_SIZES["sm"], 0.0, False),
     "field": (FONT_SIZES["sm"], 0.0, False),
     "empty": (FONT_SIZES["body"], 0.0, False),
     "emptyDetail": (FONT_SIZES["sm"], 0.0, False),
-    "value": (FONT_SIZES["xl"], 1.0, True),
-    "button": (FONT_SIZES["md"], 1.0, False),
-    "primary": (FONT_SIZES["lg"], 3.0, False),
+    "value": (FONT_SIZES["xl"], 0.6, True),
+    "button": (FONT_SIZES["md"], 0.4, False),
+    "primary": (FONT_SIZES["lg"], 1.2, False),
 }
 
 HEX_RE = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\b")
@@ -85,14 +88,24 @@ def non_gray_colors(text: str) -> list[str]:
 
 @dataclass(frozen=True)
 class Typography:
-    ui_family: str = "Segoe UI Variable Display"
+    ui_family: str = "Segoe UI Variable Text"
     ui_fallback: str = "Segoe UI"
+    display_family: str = "Segoe UI Variable Display"
+    display_fallback: str = "Segoe UI Semibold"
     mono_family: str = "Cascadia Mono"
     mono_fallback: str = "Consolas"
     letter_spacing: float = 1.4
 
     def ui(self, size: int, weight: int = 400) -> str:
         return f'font-family: "{self.ui_family}", "{self.ui_fallback}", sans-serif; font-size: {size}px; font-weight: {weight};'
+
+    def display(self, size: int, weight: int = 600) -> str:
+        """Krój nagłówków: Display ma lepsze duże stopnie niz tekstowy."""
+        return (
+            f'font-family: "{self.display_family}", "{self.display_fallback}", '
+            f'"{self.ui_family}", "{self.ui_fallback}", sans-serif; '
+            f"font-size: {size}px; font-weight: {weight};"
+        )
 
     def mono(self, size: int, weight: int = 300) -> str:
         return f'font-family: "{self.mono_family}", "{self.mono_fallback}", monospace; font-size: {size}px; font-weight: {weight};'
@@ -115,19 +128,25 @@ QWidget {{
 }}
 QMainWindow, QDialog {{ background-color: {c('bg')}; }}
 
+/* Ekrany sa przezroczyste: siatke w tle rysuje widget okna (`app._Backdrop`),
+   a karty/pola maluja sie na wlasnym, nieprzezroczystym tle. */
+QStackedWidget {{ background: transparent; border: none; }}
+QStackedWidget > QWidget {{ background: transparent; }}
+#navRail {{ background: transparent; }}
+
 QLabel[role="title"] {{
-    {TYPO.ui(FONT_SIZES['xxl'], 600)}
+    {TYPO.display(FONT_SIZES['xxl'], 600)}
     color: {c('text')};
-    letter-spacing: 6px;
+    letter-spacing: 1.6px;
 }}
-QLabel[role="subtitle"] {{ {TYPO.ui(FONT_SIZES['lg'], 400)} color: {c('text_dim')}; letter-spacing: 2px; }}
-QLabel[role="caption"] {{ {TYPO.ui(FONT_SIZES['sm'])} color: {c('text_mute')}; letter-spacing: 2px; }}
+QLabel[role="subtitle"] {{ {TYPO.display(FONT_SIZES['lg'], 600)} color: {c('text')}; letter-spacing: 0.6px; }}
+QLabel[role="caption"] {{ {TYPO.ui(FONT_SIZES['sm'], 500)} color: {c('text_mute')}; letter-spacing: 1px; }}
 QLabel[role="body"] {{ {TYPO.ui(FONT_SIZES['body'])} color: {c('text_dim')}; }}
 QLabel[role="hint"] {{ {TYPO.ui(FONT_SIZES['sm'])} color: {c('text_mute')}; letter-spacing: 0px; }}
-QLabel[role="field"] {{ {TYPO.ui(FONT_SIZES['sm'])} color: {c('text_dim')}; letter-spacing: 0px; }}
+QLabel[role="field"] {{ {TYPO.ui(FONT_SIZES['sm'], 500)} color: {c('text_dim')}; letter-spacing: 0px; }}
 QLabel[role="empty"] {{ {TYPO.ui(FONT_SIZES['body'])} color: {c('text_dim')}; }}
 QLabel[role="emptyDetail"] {{ {TYPO.ui(FONT_SIZES['sm'])} color: {c('text_mute')}; letter-spacing: 0px; }}
-QLabel[role="value"] {{ {TYPO.mono(FONT_SIZES['xl'], 300)} color: {c('text')}; letter-spacing: 1px; }}
+QLabel[role="value"] {{ {TYPO.mono(FONT_SIZES['xl'], 300)} color: {c('text')}; letter-spacing: 0.6px; }}
 QLabel[role="timer"] {{ {TYPO.mono(FONT_SIZES['timer'], 200)} color: {c('accent')}; letter-spacing: 2px; }}
 QLabel[role="timerSmall"] {{ {TYPO.mono(FONT_SIZES['timer_small'], 200)} color: {c('accent')}; }}
 
@@ -157,21 +176,27 @@ QPushButton {{
     border-radius: {RADIUS['md']}px;
     padding: 8px 16px;
     min-height: 20px;
-    letter-spacing: 1px;
+    letter-spacing: 0.4px;
 }}
 QPushButton:hover {{ background-color: {c('surface3')}; border-color: {c('text_mute')}; }}
 QPushButton:focus {{ border-color: {c('text_dim')}; }}
 QPushButton:pressed {{ background-color: {c('line')}; }}
 QPushButton:disabled {{ color: {c('disabled')}; border-color: {c('line')}; }}
 QPushButton[role="primary"] {{
-    background-color: {c('accent')};
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 {c('text')}, stop:1 {c('accent_dim')});
     color: {c('bg')};
     border: 1px solid {c('accent')};
-    {TYPO.ui(FONT_SIZES['lg'], 600)}
+    border-radius: {RADIUS['md']}px;
+    {TYPO.display(FONT_SIZES['lg'], 600)}
     padding: 12px 24px;
-    letter-spacing: 3px;
+    letter-spacing: 1.2px;
 }}
-QPushButton[role="primary"]:hover {{ background-color: {c('accent_dim')}; border-color: {c('accent_dim')}; }}
+QPushButton[role="primary"]:hover {{
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+        stop:0 {c('text')}, stop:1 {c('text')});
+    border-color: {c('text')};
+}}
 QPushButton[role="primary"]:focus {{ border-color: {c('line_strong')}; }}
 QPushButton[role="primary"]:disabled {{ background-color: {c('line_strong')}; border-color: {c('line_strong')}; color: {c('text_mute')}; }}
 QPushButton[role="ghost"] {{ background: transparent; border: 1px solid {c('line')}; color: {c('text_dim')}; }}
@@ -248,7 +273,7 @@ QHeaderView::section {{
     border: none;
     border-bottom: 1px solid {c('line')};
     padding: 8px 10px;
-    letter-spacing: 2px;
+    letter-spacing: 1px;
 }}
 QTableCornerButton::section {{ background-color: {c('surface2')}; border: none; }}
 
@@ -259,7 +284,7 @@ QTabBar::tab {{
     padding: 9px 16px;
     border: 1px solid {c('line')};
     border-bottom: none;
-    letter-spacing: 2px;
+    letter-spacing: 1px;
 }}
 QTabBar::tab:hover {{ color: {c('text_dim')}; }}
 QTabBar::tab:selected {{ background: {c('surface2')}; color: {c('text')}; border-color: {c('line_strong')}; }}
@@ -299,7 +324,7 @@ QStatusBar {{ background: {c('bg')}; color: {c('text_mute')}; }}
 QSlider::groove:horizontal {{ height: 2px; background: {c('line_strong')}; }}
 QSlider::handle:horizontal {{ background: {c('accent')}; width: 12px; margin: -6px 0; border-radius: 6px; }}
 QGroupBox {{ border: 1px solid {c('line')}; border-radius: {RADIUS['md']}px; margin-top: 14px; padding-top: 10px; }}
-QGroupBox::title {{ subcontrol-origin: margin; left: 12px; color: {c('text_mute')}; letter-spacing: 2px; }}
+QGroupBox::title {{ subcontrol-origin: margin; left: 12px; color: {c('text_mute')}; letter-spacing: 1px; }}
 """
 
 

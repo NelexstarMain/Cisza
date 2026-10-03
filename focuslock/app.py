@@ -34,6 +34,7 @@ from .controller import Controller
 from .helperclient import HelperBridge
 from .store import Store
 from .ui import sound, theme
+from .ui.widgets.paint import qcolor
 
 APP_ID = "cisza-gui"
 
@@ -132,6 +133,30 @@ class FallbackScreen(QWidget):
         layout.addWidget(caption)
 
 
+class _Backdrop(QWidget):
+    """Tlo okna: czern + prawie przezroczysta siatka (bez kolorow).
+
+    Ekrany sa przezroczyste (patrz `theme.qss()`), a karty maluja wlasne tlo,
+    wiec siatka widac tylko w odstepach - jest tlem, a nie tapeta pod tekstem.
+    """
+
+    STEP = 32
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), qcolor("bg"))
+        step = self.STEP
+        minor = qcolor("text", 9)
+        major = qcolor("text", 16)
+        for x in range(0, self.width(), step):
+            painter.setPen(major if (x // step) % 4 == 0 else minor)
+            painter.drawLine(x, 0, x, self.height())
+        for y in range(0, self.height(), step):
+            painter.setPen(major if (y // step) % 4 == 0 else minor)
+            painter.drawLine(0, y, self.width(), y)
+        painter.end()
+
+
 class MainWindow(QMainWindow):
     event_received = pyqtSignal(str, dict)
 
@@ -142,19 +167,19 @@ class MainWindow(QMainWindow):
         self.store = store
         self.setWindowTitle("Cisza")
         self.setWindowIcon(make_app_icon())
-        self.setMinimumSize(880, 560)
+        # Wieksze czcionki i pasek boczny wymagaja troche miejsca - ponizej tego
+        # rozmiaru siatki formularzy zaczynaly sie ucinaly.
+        self.setMinimumSize(960, 620)
         self.stack = QStackedWidget()
         self._nav = self._build_nav_rail()
+        container = _Backdrop()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         if self._nav is not None:
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(0)
             layout.addWidget(self._nav)
-            layout.addWidget(self.stack, 1)
-            self.setCentralWidget(container)
-        else:
-            self.setCentralWidget(self.stack)
+        layout.addWidget(self.stack, 1)
+        self.setCentralWidget(container)
 
         self.screens: dict[str, QWidget] = {}
         self._pool = QThreadPool.globalInstance()
@@ -176,7 +201,7 @@ class MainWindow(QMainWindow):
         """
         try:
             module = importlib.import_module("focuslock.ui.widgets.nav")
-            rail = module.NavRail(width=150)
+            rail = module.NavRail(width=168)
             rail.set_items(
                 [
                     ("home", "START"),
@@ -975,6 +1000,10 @@ def run(argv: Optional[list[str]] = None) -> int:
     else:
         window.show()
 
+    # Katalog aplikacji buduje sie w tle od razu po starcie (KREATOR i Ustawienia
+    # korzystaja z gotowego cache, bez zamrazania okna).
+    _warm_app_catalog(window, controller)
+
     # Pozostalosci po poprzedniej sesji: najpierw ponawiamy sprzatanie (to, co
     # da sie bez admina), a dopiero potem pokazujemy ostrzezenie z instrukcja.
     retry = startup_leftovers_report(dry_run=bool(settings.system.dry_run))
@@ -993,6 +1022,27 @@ def run(argv: Optional[list[str]] = None) -> int:
         )
 
     return app.exec()
+
+
+def _warm_app_catalog(window, controller) -> None:
+    """Uzupelnia katalog aplikacji w tle, zeby KREATOR nie zamarzl przy wejsciu.
+
+    Pelny skan Start Menu (PowerShell) i rejestru trwa kilkanascie sekund, wiec
+    robimy go raz po starcie w watku puli. Ekrany dostaja gotowy cache przez
+    `catalog_apps` (bez force), a nie przez blokujacy skan w watku GUI.
+    """
+    try:
+        module = importlib.import_module("focuslock.appcatalog")
+        if module.load_cache() is not None:
+            return
+    except Exception:  # noqa: BLE001 - brak katalogu nie moze blokowac startu
+        return
+    worker = _ActionWorker(
+        "refresh_apps",
+        lambda: controller.handle_action("refresh_apps", {"force": True}),
+        window._action_signals,
+    )
+    QTimer.singleShot(1500, lambda: window._pool.start(worker))
 
 
 def _fallback_tray(app_or_window, other) -> QSystemTrayIcon:
