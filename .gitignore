@@ -1,0 +1,35 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyInstaller / Build artifacts
+build/
+dist/
+*.spec
+
+# Testing / Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE / Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Windows thumbnail / desktop cache
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Local logs and temporary verification data
+*.log
+verify-data/

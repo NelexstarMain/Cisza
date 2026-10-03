@@ -1,0 +1,650 @@
+"""Ustawienia: 8 zakladek (Sesja, Aplikacje, Strony, Ekonomia, Blokada, Wyglad,
+Statystyki i dane, System). Ekran tylko zbiera wartosci i emituje sygnaly.
+
+Wyglad: wspolny naglowek strony, zakladki z trescia wyrównana do tych samych
+24 px marginesow co reszta ekranow, etykiety pol czytelne (mala litera, bez
+rozstrzelenia) i puste stany list zamiast pustych tabel.
+"""
+from __future__ import annotations
+
+from typing import Any
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from ..theme import SIZES
+from ..widgets import Card, DangerButton, EmptyState, GhostButton, PrimaryButton, Toggle, labels
+from .base import Screen, as_dict, as_list
+
+TAB_TITLES = (
+    "Sesja",
+    "Aplikacje",
+    "Strony",
+    "Ekonomia",
+    "Blokada",
+    "Wygląd",
+    "Statystyki i dane",
+    "System",
+)
+
+#: Wcięcie tresci zakladek: 6 + 18 (margines karty) = 24 px, jak w `Screen.MARGINS`.
+TAB_MARGINS = (6, 4, 6, 12)
+TAB_SPACING = 12
+#: Szerokosc kolumny etykiet w formularzach - kontrolki ukladaja sie w jednej linii.
+LABEL_WIDTH = 250
+
+# (nazwa pola, typ, etykieta, ...dodatki)
+FIELD_SPECS: dict[str, list[tuple]] = {
+    "session": [
+        ("study_minutes", "int", "DŁUGOŚĆ POMODORO (MIN)", 1, 240),
+        ("break_minutes", "int", "PRZERWA (MIN)", 1, 60),
+        ("long_break_minutes", "int", "DŁUGA PRZERWA (MIN)", 1, 120),
+        ("long_break_every", "int", "DŁUGA CO ILE POMODORO", 0, 12),
+        ("arming_seconds", "int", "ODLICZANIE STARTU (S)", 0, 30),
+        ("auto_start_break", "bool", "AUTOSTART PRZERWY"),
+        ("auto_start_next_study", "bool", "AUTOSTART KOLEJNEGO POMODORO"),
+        ("allow_end_early", "bool", "POZWÓL KOŃCZYĆ SESJĘ WCZEŚNIEJ"),
+    ],
+    "economy": [
+        ("earn_ratio", "float", "PRZELICZNIK: MINUTY WOLNEGO ZA MINUTĘ NAUKI", 0.0, 10.0, 0.05, 2),
+        ("round_seconds", "int", "ZAOKRĄGLANIE NAGRODY (S)", 5, 300),
+        ("daily_cap_minutes", "int", "DZIENNY LIMIT ZAROBKU (MIN)", 0, 600),
+        ("bank_ttl_days", "int", "WAŻNOŚĆ MINUT (DNI, 0 = bezterminowo)", 0, 90),
+        ("abort_penalty_minutes", "int", "KARA ZA PRZERWANIE (MIN)", 0, 120),
+        ("min_free_block_minutes", "int", "MINIMALNY BLOK WOLNEGO (MIN)", 1, 240),
+        ("streak_min_study_minutes", "int", "MINIMUM NAUKI DO SERII (MIN)", 0, 240),
+        ("require_full_pomodoro", "bool", "NAGRODA TYLKO ZA PEŁNE POMODORO"),
+    ],
+    "lock": [
+        ("mode", "choice", "TRYB BLOKADY", (("soft", "MIĘKKI"), ("hard", "TWARDY"), ("hardcore", "HARDCORE"))),
+        ("hardcore_max_minutes", "int", "MAKS. CZAS HARDCORE (MIN)", 15, 600),
+        ("suspend_instead_of_kill", "bool", "USYPNIAJ ZAMIAST ZABIJAĆ"),
+        ("block_task_manager", "bool", "BLOKUJ MENEDŻER ZADAŃ"),
+        ("block_hotkeys", "bool", "BLOKUJ SKRÓTY SYSTEMOWE"),
+        (
+            "taskbar_mode",
+            "choice",
+            "PASEK ZADAŃ W SESJI",
+            (
+                ("filtered", "TYLKO DOZWOLONE APLIKACJE"),
+                ("hide", "UKRYJ CAŁKIEM"),
+                ("keep", "NIE RUSZAJ"),
+            ),
+        ),
+        ("black_wallpaper", "bool", "CZARNA TAPETA"),
+        ("hide_desktop_icons", "bool", "UKRYJ IKONY PULPITU"),
+        ("mute_toasts", "bool", "WYCISZ POWIADOMIENIA"),
+        ("mute_sound", "bool", "WYCISZ DŹWIĘK (BEST-EFFORT)"),
+        ("prevent_sleep", "bool", "BLOKUJ USPIONY TRYB"),
+        ("emergency_hold_key", "bool", "AWARYJNE WYJŚCIE PRZYTRZYMANIEM"),
+        ("exit_cooldown_seconds", "int", "CISZA PO WYJŚCIU (S)", 0, 600),
+        ("panic_requires_pin", "bool", "WYJŚCIE AWARYJNE WYMAGA PIN-U"),
+    ],
+    "network": [
+        ("mode", "choice", "TRYB SIECI", (("allowlist", "BIAŁA LISTA"), ("blocklist", "CZARNA LISTA"), ("off", "WYŁĄCZONA"))),
+        ("proxy_port", "int", "PORT PROXY", 1024, 65535),
+        ("block_browser_direct", "bool", "BLOKUJ POŁĄCZENIA POZA PROXY"),
+        ("block_non_allowlisted_dns", "bool", "BLOKUJ DNS SPOZA LISTY"),
+        ("blocklist_mode", "choice", "CZARNA LISTA DZIAŁA", (("study_only", "TYLKO NAUKA"), ("study_and_break", "NAUKA I PRZERWA"))),
+    ],
+    "ui": [
+        ("language", "choice", "JĘZYK", (("pl", "POLSKI"), ("en", "ENGLISH"))),
+        ("sound_enabled", "bool", "DŹWIĘK INTERFEJSU"),
+        ("sound_volume", "int", "GŁOŚNOŚĆ", 0, 100),
+        ("breathing_break", "bool", "ODDECHOWY EKRAN PRZERWY"),
+        ("start_minimized", "bool", "START ZMINIMALIZOWANY"),
+        ("tray_icon", "bool", "IKONA W ZASOBNIKU SYSTEMOWYM"),
+        ("confirm_before_start", "bool", "POTWIERDZAJ START SESJI"),
+        ("event_log_visible", "bool", "POKAZUJ DZIENNIK ZDARZEŃ"),
+        ("color_app_icons", "bool", "KOLOROWE IKONY APLIKACJI"),
+        ("app_icon_size", "int", "ROZMIAR IKONY APLIKACJI (PX)", 24, 64),
+    ],
+    "system": [
+        ("autostart", "bool", "URUCHAMIAJ Z SYSTEMEM"),
+        ("launch_helper_on_start", "bool", "URUCHAMIAJ HELPER (UAC)"),
+        ("restore_on_boot", "bool", "PRZYWRACAJ SYSTEM PO STARCIE"),
+        ("dry_run", "bool", "TRYB PRÓBNY (BEZ ZMIAN W SYSTEMIE)"),
+        ("safe_mode", "bool", "TRYB BEZPIECZNY"),
+    ],
+}
+
+APPLY_LABELS = {
+    "session": "SESJA",
+    "economy": "EKONOMIA",
+    "lock": "BLOKADA",
+    "network": "SIEĆ",
+    "ui": "WYGLĄD",
+    "system": "SYSTEM",
+}
+
+APPS_EMPTY = "Brak profili aplikacji"
+APPS_EMPTY_DETAIL = "Dodaj nazwę procesu (np. chrome.exe) i wybierz, czy ma być dozwolona."
+SITES_EMPTY = "Brak profili stron"
+SITES_EMPTY_DETAIL = "Dodaj host (np. *.wikipedia.org) i wybierz kategorię."
+
+
+class SettingsScreen(Screen):
+    """Centralne ustawienia; zapis idzie jednym sygnalem `request_settings`."""
+
+    TITLE = "USTAWIENIA"
+
+    # ------------------------------------------------------------------ budowa
+    def _build(self) -> None:
+        self._status = labels.caption("ZMIANY ZAPISZ NA DOLE")
+        self.header_widget(self._status)
+
+        self._widgets: dict[str, dict[str, tuple[str, QWidget]]] = {}
+        self._tabs = QTabWidget()
+        self._tabs.addTab(self.scroll(self._tab_session()), TAB_TITLES[0])
+        self._tabs.addTab(self.scroll(self._tab_apps()), TAB_TITLES[1])
+        self._tabs.addTab(self.scroll(self._tab_sites()), TAB_TITLES[2])
+        self._tabs.addTab(self.scroll(self._tab_economy()), TAB_TITLES[3])
+        self._tabs.addTab(self.scroll(self._tab_lock()), TAB_TITLES[4])
+        self._tabs.addTab(self.scroll(self._tab_ui()), TAB_TITLES[5])
+        self._tabs.addTab(self.scroll(self._tab_data()), TAB_TITLES[6])
+        self._tabs.addTab(self.scroll(self._tab_system()), TAB_TITLES[7])
+        self.root.addWidget(self._tabs, 1)
+
+        actions = self.action_bar()
+        save = PrimaryButton("ZAPISZ USTAWIENIA")
+        save.clicked.connect(self._save)
+        reset = GhostButton("PRZYWRÓĆ DOMYŚLNE")
+        reset.clicked.connect(lambda: self.request_action.emit("reset_settings", {}))
+        self._pin_status = labels.caption("PIN: NIE USTAWIONO")
+        actions.addWidget(save)
+        actions.addWidget(reset)
+        actions.addStretch(1)
+        actions.addWidget(self._pin_status)
+
+    # ------------------------------------------------------- fabryki zakladek
+    @staticmethod
+    def _page() -> tuple[QWidget, QVBoxLayout]:
+        """Strona zakladki z marginesami wspolnymi dla calego UI."""
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(*TAB_MARGINS)
+        layout.setSpacing(TAB_SPACING)
+        return page, layout
+
+    def _form(self, title: str, subtitle: str, group: str, specs: list[tuple]) -> Card:
+        card = Card(title, subtitle)
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        form.setFormAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.DontWrapRows)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setHorizontalSpacing(18)
+        form.setVerticalSpacing(10)
+        self._widgets.setdefault(group, {})
+        for spec in specs:
+            name, kind = spec[0], spec[1]
+            label = labels.field(str(spec[2]))
+            label.setMinimumWidth(LABEL_WIDTH)
+            label.setMaximumWidth(LABEL_WIDTH)
+            widget = self._make_widget(kind, spec[3:])
+            form.addRow(label, widget)
+            self._widgets[group][name] = (kind, widget)
+        card.add_layout(form)
+        return card
+
+    @staticmethod
+    def _make_widget(kind: str, extra: tuple) -> QWidget:
+        if kind == "int":
+            spin = QSpinBox()
+            spin.setRange(int(extra[0]), int(extra[1]))
+            spin.setMinimumWidth(120)
+            spin.setMaximumWidth(200)
+            spin.setMinimumHeight(SIZES["input"])
+            return spin
+        if kind == "float":
+            spin = QDoubleSpinBox()
+            spin.setRange(float(extra[0]), float(extra[1]))
+            spin.setSingleStep(float(extra[2]))
+            spin.setDecimals(int(extra[3]))
+            spin.setMinimumWidth(120)
+            spin.setMaximumWidth(200)
+            spin.setMinimumHeight(SIZES["input"])
+            return spin
+        if kind == "bool":
+            return Toggle("")
+        if kind == "choice":
+            combo = QComboBox()
+            for value, text in extra[0]:
+                combo.addItem(str(text), str(value))
+            combo.setMinimumWidth(220)
+            combo.setMaximumWidth(340)
+            combo.setMinimumHeight(SIZES["input"])
+            return combo
+        field = QLineEdit()
+        field.setMinimumHeight(SIZES["input"])
+        return field
+
+    @staticmethod
+    def _field_row(*widgets: QWidget, stretch: dict | None = None) -> QHBoxLayout:
+        """Rzad pol formularza z jednym rytmem odstepow i wysokosci."""
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        for index, widget in enumerate(widgets):
+            row.addWidget(widget, (stretch or {}).get(index, 0))
+        return row
+
+    def _tab_session(self) -> QWidget:
+        page, layout = self._page()
+        layout.addWidget(self._form("SESJA", "POMODORO, PRZERWY, START", "session", FIELD_SPECS["session"]))
+        layout.addStretch(1)
+        return page
+
+    def _tab_apps(self) -> QWidget:
+        page, layout = self._page()
+        card = Card("PROFILE APLIKACJI", "CO MOŻE DZIAŁAĆ, A CO JEST BLOKOWANE")
+        self._apps_empty = EmptyState(APPS_EMPTY, APPS_EMPTY_DETAIL)
+        card.add(self._apps_empty)
+        self._apps_list = QListWidget()
+        self._apps_list.setMinimumHeight(200)
+        self._apps_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self._apps_list.setWordWrap(False)
+        self._apps_list.setAlternatingRowColors(False)
+        self._apps_list.setVisible(False)
+        card.add(self._apps_list)
+        card.body.setStretchFactor(self._apps_list, 1)
+        self._app_label = QLineEdit()
+        self._app_label.setPlaceholderText("nazwa, np. Chrome")
+        self._app_value = QLineEdit()
+        self._app_value.setPlaceholderText("wartość, np. chrome.exe")
+        self._app_kind = QComboBox()
+        for value, text in (("name", "NAZWA"), ("path", "ŚCIEŻKA"), ("signature", "SYGNATURA")):
+            self._app_kind.addItem(text, value)
+        self._app_category = QComboBox()
+        for value, text in (("STUDY", "DOZWOLONA (NAUKA)"), ("BLOCKED", "BLOKOWANA")):
+            self._app_category.addItem(text, value)
+        card.add_layout(self._field_row(self._app_label, self._app_value, self._app_kind, self._app_category,
+                                        stretch={0: 2, 1: 3}))
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        add = GhostButton("DODAJ / ZAPISZ")
+        add.clicked.connect(self._save_app)
+        remove = GhostButton("USUŃ ZAZNACZONE")
+        remove.clicked.connect(self._delete_app)
+        buttons.addWidget(add)
+        buttons.addWidget(remove)
+        buttons.addStretch(1)
+        card.add_layout(buttons)
+        card.set_hint("Dopasowanie po nazwie procesu działa szybko; po sygnaturze — odpornej na zmianę nazwy pliku.")
+        layout.addWidget(card, 1)
+        return page
+
+    def _tab_sites(self) -> QWidget:
+        page, layout = self._page()
+        card = Card("PROFILE STRON", "HOSTY DOZWOLONE I BLOKOWANE")
+        self._sites_empty = EmptyState(SITES_EMPTY, SITES_EMPTY_DETAIL)
+        card.add(self._sites_empty)
+        self._sites_list = QListWidget()
+        self._sites_list.setMinimumHeight(200)
+        self._sites_list.setTextElideMode(Qt.TextElideMode.ElideRight)
+        self._sites_list.setWordWrap(False)
+        self._sites_list.setAlternatingRowColors(False)
+        self._sites_list.setVisible(False)
+        card.add(self._sites_list)
+        card.body.setStretchFactor(self._sites_list, 1)
+        self._site_host = QLineEdit()
+        self._site_host.setPlaceholderText("host, np. *.wikipedia.org")
+        self._site_label = QLineEdit()
+        self._site_label.setPlaceholderText("opis (opcjonalnie)")
+        self._site_category = QComboBox()
+        for value, text in (("STUDY", "DOZWOLONA"), ("BLOCKED", "BLOKOWANA")):
+            self._site_category.addItem(text, value)
+        card.add_layout(self._field_row(self._site_host, self._site_label, self._site_category, stretch={0: 3, 1: 2}))
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        add = GhostButton("DODAJ / ZAPISZ")
+        add.clicked.connect(self._save_site)
+        remove = GhostButton("USUŃ ZAZNACZONE")
+        remove.clicked.connect(self._delete_site)
+        buttons.addWidget(add)
+        buttons.addWidget(remove)
+        buttons.addStretch(1)
+        card.add_layout(buttons)
+        card.set_hint("Wpisy z gwiazdką (*.example.com) obejmują subdomeny. Domeny systemowe z listy bezpiecznej nigdy nie są blokowane.")
+        layout.addWidget(card, 1)
+        return page
+
+    def _tab_economy(self) -> QWidget:
+        page, layout = self._page()
+        layout.addWidget(self._form("EKONOMIA", "ILE WOLNEGO ZA ILE NAUKI", "economy", FIELD_SPECS["economy"]))
+        card = Card("KOREKTA BANKU", "RĘCZNA ZMIANA SALDA (ŚCIEŻKA AUDYTOWANA)")
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._adjust_minutes = QSpinBox()
+        self._adjust_minutes.setRange(-600, 600)
+        self._adjust_minutes.setValue(15)
+        self._adjust_minutes.setMinimumWidth(120)
+        self._adjust_minutes.setMinimumHeight(SIZES["input"])
+        self._adjust_note = QLineEdit()
+        self._adjust_note.setPlaceholderText("powód korekty")
+        plus = GhostButton("DODAJ DO BANKU")
+        plus.clicked.connect(lambda: self._adjust(1))
+        minus = GhostButton("ZABIERZ Z BANKU")
+        minus.clicked.connect(lambda: self._adjust(-1))
+        row.addWidget(self._adjust_minutes)
+        row.addWidget(self._adjust_note, 1)
+        row.addWidget(plus)
+        row.addWidget(minus)
+        card.add_layout(row)
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
+
+    def _tab_lock(self) -> QWidget:
+        page, layout = self._page()
+        layout.addWidget(self._form("BLOKADA", "CO ZNIKA W TRAKCIE SESJI", "lock", FIELD_SPECS["lock"]))
+        layout.addWidget(self._form("SIEĆ", "PROXY, HOSTS, ZAPORA", "network", FIELD_SPECS["network"]))
+        card = Card("NARZĘDZIA BLOKADY")
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        pin = GhostButton("USTAW / ZMIEŃ PIN")
+        pin.clicked.connect(lambda: self.request_action.emit("open_pin_dialog", {}))
+        test = GhostButton("TEST NA SUCHO")
+        test.clicked.connect(lambda: self.request_action.emit("test_lock", {"dry_run": True}))
+        restore = DangerButton("PRZYWRÓĆ SYSTEM TERAZ")
+        restore.clicked.connect(lambda: self.request_action.emit("restore_everything", {"reason": "ui"}))
+        buttons.addWidget(pin)
+        buttons.addWidget(test)
+        buttons.addStretch(1)
+        buttons.addWidget(restore)
+        card.add_layout(buttons)
+        card.set_hint("Test na sucho nic nie zmienia w systemie — pokazuje, co zostałoby zrobione.")
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
+
+    def _tab_ui(self) -> QWidget:
+        page, layout = self._page()
+        layout.addWidget(self._form("WYGLĄD", "MONOCHROMATYCZNY INTERFEJS", "ui", FIELD_SPECS["ui"]))
+        layout.addStretch(1)
+        return page
+
+    def _tab_data(self) -> QWidget:
+        page, layout = self._page()
+        card = Card("DANE I STATYSTYKI", "EKSPORT, KOPIE, CZYSZCZENIE")
+        self._data_info = labels.hint("Brak informacji o bazie.")
+        card.add(self._data_info)
+        row_one = QHBoxLayout()
+        row_one.setSpacing(8)
+        refresh = GhostButton("ODŚWIEŻ STATYSTYKI")
+        refresh.clicked.connect(lambda: self.request_action.emit("refresh_stats", {}))
+        export = GhostButton("EKSPORTUJ CSV")
+        export.clicked.connect(lambda: self.request_action.emit("export_stats", {"format": "csv"}))
+        backup = GhostButton("KOPIA ZAPASOWA")
+        backup.clicked.connect(lambda: self.request_action.emit("backup_database", {}))
+        row_one.addWidget(refresh)
+        row_one.addWidget(export)
+        row_one.addWidget(backup)
+        row_one.addStretch(1)
+        card.add_layout(row_one)
+        row_two = QHBoxLayout()
+        row_two.setSpacing(8)
+        restore_backup = GhostButton("PRZYWRÓĆ Z KOPII")
+        restore_backup.clicked.connect(self._pick_restore_backup)
+        self._confirm_wipe = Toggle("POTWIERDZAM, ŻE CHCĘ USUNĄĆ DANE")
+        wipe = DangerButton("WYCZYŚĆ DANE")
+        wipe.clicked.connect(self._wipe)
+        row_two.addWidget(restore_backup)
+        row_two.addStretch(1)
+        row_two.addWidget(self._confirm_wipe)
+        row_two.addWidget(wipe)
+        card.add_layout(row_two)
+        card.set_hint("Kopia zapasowa zawiera bazę sesji, banku i ustawień. Czyszczenie jest nieodwracalne.")
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
+
+    def _tab_system(self) -> QWidget:
+        page, layout = self._page()
+        layout.addWidget(self._form("SYSTEM", "AUTOSTART, HELPER, TRYBY AWARYJNE", "system", FIELD_SPECS["system"]))
+        card = Card("DIAGNOSTYKA")
+        buttons = QHBoxLayout()
+        buttons.setSpacing(8)
+        diagnostics = GhostButton("SPRAWDŹ ŚRODOWISKO")
+        diagnostics.clicked.connect(lambda: self.request_action.emit("diagnostics", {}))
+        autostart = GhostButton("PRZEŁĄCZ AUTOSTART")
+        autostart.clicked.connect(lambda: self.request_action.emit("toggle_autostart", {}))
+        helper = GhostButton("URUCHOM HELPER (UAC)")
+        helper.clicked.connect(lambda: self.request_action.emit("helper_start", {}))
+        buttons.addWidget(diagnostics)
+        buttons.addWidget(autostart)
+        buttons.addWidget(helper)
+        buttons.addStretch(1)
+        card.add_layout(buttons)
+        self._diag_info = labels.hint("Diagnostyka nie została jeszcze uruchomiona.")
+        card.add(self._diag_info)
+        card.set_hint(
+            "Helper działa z uprawnieniami administratora — UAC może poprosić o zgodę przy starcie. "
+            "Bez niego blokada procesów, sieci i skrótów nie działa (pasek zadań filtruje samo GUI)."
+        )
+        layout.addWidget(card)
+        layout.addStretch(1)
+        return page
+
+    # ------------------------------------------------------------------ dane
+    def values(self) -> dict:
+        """Biezace wartosci z widgetow (grupa -> pole -> wartosc)."""
+        out: dict[str, dict[str, Any]] = {}
+        for group, fields in self._widgets.items():
+            group_values: dict[str, Any] = {}
+            for name, (kind, widget) in fields.items():
+                group_values[name] = _read_widget(kind, widget)
+            out[group] = group_values
+        return out
+
+    def apply_settings(self, settings: dict) -> None:
+        settings = as_dict(settings)
+        for group, fields in self._widgets.items():
+            group_values = settings.get(group)
+            if not isinstance(group_values, dict):
+                continue
+            for name, (kind, widget) in fields.items():
+                if name in group_values:
+                    _write_widget(kind, widget, group_values[name])
+
+    def render(self, data: dict) -> None:
+        settings = data.get("settings")
+        if isinstance(settings, dict):
+            self.apply_settings(settings)
+        if data.get("apps") is not None:
+            self._fill_apps(as_list(data.get("apps")))
+        if data.get("sites") is not None:
+            self._fill_sites(as_list(data.get("sites")))
+        if data.get("has_pin") is not None or data.get("pin_set") is not None:
+            has_pin = bool(data.get("has_pin") or data.get("pin_set"))
+            self._pin_status.setText("PIN: USTAWIONY" if has_pin else "PIN: NIE USTAWIONO")
+        info = data.get("storage")
+        if isinstance(info, dict):
+            self._data_info.setText(
+                f"Baza: {info.get('path', '—')} · sesje: {info.get('sessions', 0)} · "
+                f"wpisy dziennika: {info.get('events', 0)} · rozmiar: {info.get('size', '—')}"
+            )
+        if data.get("status"):
+            self._status.setText(str(data["status"]))
+
+    def _fill_apps(self, rows: list[dict]) -> None:
+        self._apps_list.clear()
+        for raw in as_list(rows):
+            row = as_dict(raw)
+            category = "BLOK" if str(row.get("category", "")).upper() in ("BLOCK", "BLOCKED") else "NAUKA"
+            value = str(row.get("match_value") or "—")
+            text = f"{row.get('label') or value}  ·  {row.get('match_kind')}: {value}  ·  {category}"
+            item = QListWidgetItem(text)
+            item.setToolTip(text)
+            item.setData(Qt.ItemDataRole.UserRole, row.get("id"))
+            self._apps_list.addItem(item)
+        empty = self._apps_list.count() == 0
+        self._apps_empty.setVisible(empty)
+        self._apps_list.setVisible(not empty)
+
+    def _fill_sites(self, rows: list[dict]) -> None:
+        self._sites_list.clear()
+        for raw in as_list(rows):
+            row = as_dict(raw)
+            category = "BLOK" if str(row.get("category", "")).upper() in ("BLOCK", "BLOCKED") else "NAUKA"
+            label = f"  ·  {row.get('label')}" if row.get("label") else ""
+            text = f"{row.get('host')}{label}  ·  {category}"
+            item = QListWidgetItem(text)
+            item.setToolTip(text)
+            item.setData(Qt.ItemDataRole.UserRole, row.get("id"))
+            self._sites_list.addItem(item)
+        empty = self._sites_list.count() == 0
+        self._sites_empty.setVisible(empty)
+        self._sites_list.setVisible(not empty)
+
+    # ------------------------------------------------------------------ akcje
+    def _save(self) -> None:
+        payload = self.values()
+        self.request_settings.emit(payload)
+        self._status.setText("ZAPISANO USTAWIENIA")
+        self.show_toast("Ustawienia zapisane.")
+
+    def _save_app(self) -> None:
+        value = self._app_value.text().strip()
+        if not value:
+            self.show_toast("Podaj nazwę procesu lub ścieżkę.")
+            return
+        self.request_action.emit(
+            "save_app",
+            {
+                "label": self._app_label.text().strip() or value,
+                "match_kind": self._app_kind.currentData(),
+                "match_value": value,
+                "category": self._app_category.currentData(),
+            },
+        )
+        self._app_label.clear()
+        self._app_value.clear()
+
+    def _delete_app(self) -> None:
+        item = self._apps_list.currentItem()
+        if item is None:
+            self.show_toast("Zaznacz profil do usunięcia.")
+            return
+        self.request_action.emit("delete_app", {"id": item.data(Qt.ItemDataRole.UserRole)})
+
+    def _save_site(self) -> None:
+        host = self._site_host.text().strip()
+        if not host:
+            self.show_toast("Podaj host.")
+            return
+        self.request_action.emit(
+            "save_site",
+            {
+                "host": host,
+                "label": self._site_label.text().strip(),
+                "category": self._site_category.currentData(),
+            },
+        )
+        self._site_host.clear()
+        self._site_label.clear()
+
+    def _delete_site(self) -> None:
+        item = self._sites_list.currentItem()
+        if item is None:
+            self.show_toast("Zaznacz profil do usunięcia.")
+            return
+        self.request_action.emit("delete_site", {"id": item.data(Qt.ItemDataRole.UserRole)})
+
+    def _adjust(self, sign: int) -> None:
+        minutes = abs(int(self._adjust_minutes.value())) * (1 if sign >= 0 else -1)
+        if minutes == 0:
+            self.show_toast("Korekta nie może być zerowa.")
+            return
+        self.request_action.emit(
+            "adjust_bank", {"minutes": minutes, "note": self._adjust_note.text().strip() or "korekta ręczna"}
+        )
+        self._adjust_note.clear()
+
+    def _wipe(self) -> None:
+        if not self._confirm_wipe.isChecked():
+            self.show_toast("Najpierw zaznacz potwierdzenie.")
+            return
+        self.request_action.emit("wipe_data", {"confirm": True})
+
+    def _pick_restore_backup(self) -> None:
+        """Wybór pliku kopii przed przywróceniem (wcześniej wysyłano pusty payload)."""
+        directory = ""
+        try:
+            from ... import paths
+
+            directory = str(paths.backup_dir())
+        except Exception:  # noqa: BLE001
+            directory = ""
+        chosen, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Wybierz kopię bazy Ciszy",
+            directory,
+            "Kopie Ciszy (*.db);;Wszystkie pliki (*)",
+        )
+        if not chosen:
+            self.show_toast("Nie wybrano pliku kopii.")
+            return
+        self.request_action.emit("restore_database", {"path": chosen})
+
+    # ------------------------------------------------------------- wyniki akcji
+    def on_action_result(self, action: str, result: dict) -> None:
+        """`SPRAWDŹ ŚRODOWISKO` pokazuje wynik zamiast po cichu go zgubić."""
+        if action != "diagnostics":
+            return
+        data = as_dict(result)
+        if not data.get("ok"):
+            self._diag_info.setText("Nie udało się sprawdzić środowiska.")
+            self._status.setText("DIAGNOSTYKA: BŁĄD")
+            return
+        helper = "online" if data.get("helper_online") else f"offline ({data.get('helper_error') or 'brak'})"
+        parts = [
+            f"wersja {data.get('wersja', '?')}",
+            f"Python {data.get('python', '?')}",
+            f"helper: {helper}",
+            f"administrator: {'tak' if data.get('admin') else 'nie'}",
+            f"autostart: {data.get('autostart', '?')}",
+            f"bank: {as_int(data.get('bank_min'))} min",
+            f"sesje: {as_int(data.get('sesji'))}",
+        ]
+        self._diag_info.setText(" · ".join(parts))
+        self._status.setText("DIAGNOSTYKA: OK")
+
+
+def _read_widget(kind: str, widget: QWidget):
+    if kind == "int":
+        return int(widget.value())  # type: ignore[attr-defined]
+    if kind == "float":
+        return float(widget.value())  # type: ignore[attr-defined]
+    if kind == "bool":
+        return bool(widget.isChecked())  # type: ignore[attr-defined]
+    if kind == "choice":
+        return str(widget.currentData())  # type: ignore[attr-defined]
+    return str(widget.text())  # type: ignore[attr-defined]
+
+
+def _write_widget(kind: str, widget: QWidget, value) -> None:
+    if kind == "int":
+        widget.setValue(int(value))  # type: ignore[attr-defined]
+    elif kind == "float":
+        widget.setValue(float(value))  # type: ignore[attr-defined]
+    elif kind == "bool":
+        widget.setChecked(bool(value))  # type: ignore[attr-defined]
+    elif kind == "choice":
+        index = widget.findData(str(value))  # type: ignore[attr-defined]
+        if index >= 0:
+            widget.setCurrentIndex(index)  # type: ignore[attr-defined]
+    else:
+        widget.setText(str(value))  # type: ignore[attr-defined]
