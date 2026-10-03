@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (
 
 from ..theme import SIZES
 from ..widgets import Card, DangerButton, EmptyState, GhostButton, PrimaryButton, Toggle, labels
-from .base import Screen, as_dict, as_list
+from .base import Screen, as_dict, as_int, as_list
 
 TAB_TITLES = (
     "Sesja",
