@@ -82,7 +82,7 @@ def test_tray_quit_goes_through_shutdown():
     from focuslock import app as app_module
 
     source = inspect.getsource(app_module.run)
-    assert "tray.quit_requested.connect(self._shutdown_and_quit)" in source
+    assert "tray.quit_requested.connect(window._shutdown_and_quit)" in source
     assert "def _shutdown_and_quit" in inspect.getsource(app_module.MainWindow)
     handler = inspect.getsource(app_module.MainWindow._shutdown_and_quit)
     assert "controller.shutdown()" in handler

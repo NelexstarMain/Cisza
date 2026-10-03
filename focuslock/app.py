@@ -874,7 +874,7 @@ def run(argv: Optional[list[str]] = None) -> int:
             tray.start_requested.connect(lambda: window._start_study({}))
             tray.end_requested.connect(lambda: window._request_end("user"))
             tray.stats_requested.connect(lambda: window.show_screen("stats"))
-            tray.quit_requested.connect(self._shutdown_and_quit)
+            tray.quit_requested.connect(window._shutdown_and_quit)
             tray.show()
         except Exception:
             tray = _fallback_tray(app, window)
