@@ -1,26 +1,37 @@
-"""Grain tla: wiele rodzajow i poziomow ziarna (bez innych tekstur).
+"""Faktura UI: ziarno (szum) i rastr (halftone) - rodzaje, poziomy, warstwy.
 
-Wszystko, co robi ten modul, to **ziarno**: rozsypane punkty wybierane deter-
-ministycznym szumem (64 poziomy krycia), powielane z malego, cache'owanego
-kafelka (``drawTiledPixmap``). Dzieki temu:
+Modul ma dwie rodziny faktury, obie monochromatyczne i cache'owane:
 
-* **rodzaje** - pojedyncze piksele (``sand``/``fine``/``medium``/``coarse``),
-  grudki (``clump``, ``clump_coarse``, ``clump_rare`` - ziarno zlepione
-  w kwadraty 2x2/3x3/4x4), rzadkie jasne pylki (``dust``) i ciemne ziarno na
-  jasnych tlach (``pepper``),
-* **poziomy** - od ``sand`` (ledwie widoczny piasek) do ``coarse`` (gesta
-  kaszka); kazdy poziom ma inny kafelek i inne krycie, wiec nakladajac je
-  dostajemy glebie bez widocznej siatki powtorzen,
-* **koszt** - kafelek liczy sie raz, potem jest tylko powielany; liczba warstw
-  nie wplywa na czas malowania,
-* **monochromatycznosc** - kazdy piksel wyniku ma R == G == B (tokeny motywu).
+**Ziarno** (``GRAINS``) - rozsypane punkty wybierane deterministycznym szumem
+(64 poziomy krycia), powielane z malego kafelka:
 
-Uwaga na przyszlosc: do ziarna **nie** uzywamy macierzy Bayera. Uporzadkowany
-wzor ma (przy niskich kryciach) cale jasne i cale ciemne wiersze, co na duzym
-tle czyta sie jak poziome pasy, a nie jak ziarno - dlatego maska jest szumem.
+* pojedyncze piksele: ``sand``/``fine``/``medium``/``coarse`` (od ledwo
+  widocznego piasku do gestej kaszki),
+* grudki: ``clump``/``clump_coarse``/``clump_rare`` (ziarno zlepione
+  w kwadraty 2x2/3x3/4x4),
+* ``dust`` (rzadkie jasne pylki) i ``pepper`` (ciemne ziarno na jasnych tlach).
 
-Z tego samego zestawu korzysta tlo okna, karty, puste stany, plakietki,
-komunikaty, kafle aplikacji, pasek nawigacji, wykresy, kontrolki i dialogi.
+**Rastr / halftone** (``HALFTONES``, ``SPARSE_SCREENS``) - kropki na stalej
+siatce, jak na torze pierscienia i na wlaczniku:
+
+* ``hair``/``veil``/``soft``/``light``/``mid``/``strong``/``dense``/``solid``
+  oraz warianty ``coarse`` - od 3% do 100% krycia, w siatkach 2-6 px,
+* ``HALFTONE_INTENSITIES`` - drabinka 64 stopni (``dot_side``),
+* ``whisper``/``whisper_coarse`` - rzadkie, grube kropki tla (ledwo widoczne),
+* ``paint_halftone_fade`` - rastr, ktory wygasa maska (plynna intensywnosc),
+* ``dither_brush``/``fill_dither`` w ``paint`` - uporzadkowany rastr danych
+  z 64 stopniami krycia (heatmapa, paski, wykresy, ikony).
+
+Dzieki cache'owanym kafelkom liczba warstw nie podnosi kosztu malowania,
+a kazdy piksel wyniku ma R == G == B (tokeny motywu).
+
+Uwaga na przyszlosc: do *ziarna* nie uzywamy macierzy Bayera - uporzadkowany
+wzor ma przy niskich kryciach cale jasne i cale ciemne wiersze, co na duzym
+tle czyta sie jak poziome pasy. Do rastra Bayera uzywamy swiadomie (to wlasnie
+daje rowny rastr kropek).
+
+Z obu rodzin korzysta tlo okna, karty, puste stany, plakietki, komunikaty,
+kafle aplikacji, pasek nawigacji, wykresy, wskazniki, kontrolki i dialogi.
 """
 from __future__ import annotations
 
@@ -41,10 +52,10 @@ _MASK = 0xFFFFFFFF
 class Grain:
     """Jeden rodzaj/poziom ziarna.
 
-    ``size`` to bok kafelka w pikselach (zawsze ``8 * block``), ``block`` -
-    rozmiar grudki (1 = pojedyncze piksele, 2/3 = zlepione kwadraty),
-    ``step`` - ile z 64 progow Bayera jest zapalonych, ``alpha`` - krycie
-    ziarna, ``tint`` - kolor (``text`` = jasne ziarno, ``bg`` = ciemne).
+    ``size`` to bok kafelka w pikselach, ``block`` - rozmiar grudki
+    (1 = pojedyncze piksele, 2/3/4 = zlepione kwadraty), ``step`` - ile z 64
+    progow szumu jest zapalonych, ``alpha`` - krycie ziarna, ``tint`` - kolor
+    (``text`` = jasne ziarno, ``bg`` = ciemne).
     """
 
     name: str
