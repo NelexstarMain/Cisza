@@ -176,6 +176,9 @@ class Toast(QFrame):
             radius=7.0,
             names=("fine", "sand", "clump"),
             opacity=0.95,
+            screens=("soft", "hair"),
+            screen_opacity=0.8,
+            screen_alpha=texture.SCREEN_ALPHA_SURFACE,
         )
         painter.setFont(ui_font(FONT_SIZES["sm"]))
         painter.setPen(qcolor("text"))
@@ -217,5 +220,8 @@ class Badge(QFrame):
                 radius=max(0.0, float(RADIUS["md"]) - 1.0),
                 names=texture.SOFT_STACK,
                 opacity=0.7,
+                screens=("hair", "coarse"),
+                screen_opacity=0.8,
+                screen_alpha=texture.SCREEN_ALPHA_SURFACE,
             )
         painter.end()

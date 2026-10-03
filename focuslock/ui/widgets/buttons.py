@@ -34,8 +34,9 @@ def _paint_button_grain(
     tint: str = "bg",
     opacity: float = 0.35,
     radius: float = 0.0,
+    screens: tuple[str, ...] = ("hair",),
 ) -> None:
-    """Ziarno wewnatrz konturki widgetu (przyciete do zaokraglenia)."""
+    """Ziarno i rastr wewnatrz konturki widgetu (przyciete do zaokraglenia)."""
     rect = QRectF(widget.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
     if rect.width() < 4.0 or rect.height() < 4.0:
         return
@@ -46,6 +47,10 @@ def _paint_button_grain(
         names=BUTTON_GRAIN,
         opacity=opacity,
         tint=tint,
+        screens=screens,
+        screen_opacity=0.9,
+        screen_alpha=30,
+        screen_tint=tint,
     )
 
 
@@ -262,13 +267,16 @@ class Toggle(QAbstractButton):
         # Tor tez "plynie": im blizej konca, tym jasniejszy.
         painter.setBrush(gray_level(0.25 + 0.35 * progress, "surface2", "surface3"))
         painter.drawRoundedRect(track, radius, radius)
-        # Tor jest materialem tej samej rodziny co tlo (drobne ziarno).
+        # Tor jest materialem tej samej rodziny co tlo (ziarno + rastr).
         texture.paint_surface(
             painter,
             track.adjusted(1.0, 1.0, -1.0, -1.0),
             radius=max(0.0, radius - 1.0),
             names=texture.SOFT_STACK,
             opacity=0.75,
+            screens=("soft", "hair"),
+            screen_opacity=0.85,
+            screen_alpha=texture.SCREEN_ALPHA_SURFACE,
         )
 
         knob_d = track_h - 6.0
@@ -490,8 +498,18 @@ class ChoiceGroup(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(gradient))
         painter.drawPath(path)
-        # Pigulka to ta sama "substancja" co pasek boczny - drobne ziarno pod obramowaniem.
+        # Pigulka to ta sama "substancja" co pasek boczny - ziarno i rastr pod
+        # obramowaniem, wiec nie wyglada jak plastik.
         texture.paint_grain(painter, path.boundingRect(), "sand", phase=4, opacity=0.75, clip=path)
+        texture.paint_halftone(
+            painter,
+            path.boundingRect(),
+            "hair",
+            phase=1,
+            opacity=0.85,
+            alpha=texture.SCREEN_ALPHA_SURFACE,
+            clip=path,
+        )
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(pen("line_strong"))
         painter.drawPath(path)

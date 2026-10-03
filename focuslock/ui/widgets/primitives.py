@@ -38,6 +38,8 @@ class Card(QFrame):
 
     #: Poziomy ziarna karty (od drobnego do najdrobniejszego).
     TEXTURE_LEVELS: tuple[str, ...] = texture.SURFACE_STACK
+    #: Rastry kladzione na ziarno (karta jest wielowarstwowa).
+    SCREEN_LEVELS: tuple[str, ...] = ("hair", "coarse")
     #: Krycie ziarna w stanie spoczynku / aktywnym.
     TEXTURE_OPACITY = 0.65
     TEXTURE_OPACITY_ACTIVE = 1.0
@@ -94,6 +96,9 @@ class Card(QFrame):
             radius=max(0.0, float(RADIUS["lg"]) - 1.0),
             names=self.TEXTURE_LEVELS,
             opacity=self.texture_opacity(),
+            screens=self.SCREEN_LEVELS,
+            screen_opacity=0.9,
+            screen_alpha=texture.SCREEN_ALPHA_SURFACE,
         )
         painter.end()
 
@@ -183,6 +188,9 @@ class EmptyState(QFrame):
             radius=max(0.0, float(RADIUS["md"]) - 1.0),
             names=("medium", "sand", "clump"),
             opacity=0.6,
+            screens=("veil", "coarse"),
+            screen_opacity=0.8,
+            screen_alpha=texture.SCREEN_ALPHA_SURFACE,
         )
         painter.end()
 

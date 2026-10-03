@@ -139,7 +139,7 @@ class _Backdrop(QWidget):
 
     Ekrany sa przezroczyste (patrz `theme.qss()`), a karty maluja wlasne tlo,
     wiec ziarno widac tylko w odstepach - to tlo, a nie tapeta pod tekstem.
-    Tlo to **tylko ziarno** - zadnych linii ani siatki.
+    Tlo to ziarno plus najcienszy rastr - zadnych linii ani siatki.
 
     Warstwy (patrz `widgets.texture.GRAINS`):
 
@@ -148,7 +148,10 @@ class _Backdrop(QWidget):
        wiec wzor sie nie powtarza),
     2. ``clump``/``clump_coarse``/``clump_rare`` - ziarno zlepione w grudki
        2x2, 3x3 i 4x4 (inny charakter niz pojedyncze piksele),
-    3. ``dust`` - rzadkie, jasne pylki nad calym tlem.
+    3. ``dust`` - rzadkie, jasne pylki nad calym tlem,
+    4. dwa bardzo rzadkie, grube rastry (``whisper``/``whisper_coarse``: kropka
+       4 px co 32 px i 8 px co 64 px, na 1 z 64 pozycji siatki) - warstwa,
+       ktora ma byc ledwo widoczna; bez linii i bez siatki.
 
     Wszystko rysujemy z cache'owanych kafelkow, wiec liczba poziomow nie
     podnosi kosztu przerysowania.
@@ -156,6 +159,8 @@ class _Backdrop(QWidget):
 
     #: Poziomy ziarna tla (test regresyjny pilnuje, ze jest ich wiecej niz dwa).
     TEXTURE_LEVELS: tuple[str, ...] = texture.BACKDROP_STACK
+    #: Rzadkie warstwy rastra tla (ledwo widoczne kropki).
+    SCREEN_LEVELS: tuple[str, ...] = texture.SCREEN_STACK_BACKDROP
 
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
         painter = QPainter(self)
@@ -169,6 +174,9 @@ class _Backdrop(QWidget):
         texture.paint_stack(painter, rect, self.TEXTURE_LEVELS, opacity=0.7)
         # 2. pylki: rzadkie, jasne punkty ponad ziarnem
         texture.paint_grain(painter, rect, "dust", phase=5, opacity=0.9)
+        # 3. rzadki rastr: pojedyncze, grube kropki co kilkadziesiat pikseli,
+        #    tylko o kilka stopni jasniejsze od ziarna - ma byc ledwo widoczny
+        texture.paint_sparse_stack(painter, rect, self.SCREEN_LEVELS, opacity=0.75, phase_shift=9)
         painter.end()
 
 

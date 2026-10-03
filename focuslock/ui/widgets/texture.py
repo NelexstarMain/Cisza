@@ -159,6 +159,258 @@ def grain_pixmap(name: str = "fine", *, tint: str | None = None, alpha: float | 
 def clear_cache() -> None:
     """Czysci cache kafelkow (testy, zmiana motywu)."""
     _PIXMAP_CACHE.clear()
+    _SCREEN_CACHE.clear()
+
+
+# ------------------------------------------------------------------ halftone
+@dataclass(frozen=True)
+class Halftone:
+    """Rastr (halftone): kropki na stalej siatce, wielkosc = intensywnosc.
+
+    ``cell`` to odstep siatki w pikselach, ``level`` - ile z 64 stopni ma
+    kropka (0 = brak, 64 = pelna kratka), ``alpha`` - krycie kropki. Kropki
+    leza w rownych odstepach, wiec rastr czyta sie jak sitodruk / punktowane
+    tlo znane z wykresow i pierscienia postepu.
+    """
+
+    name: str
+    cell: int
+    level: int
+    alpha: int
+    tint: str = "text"
+
+    @property
+    def coverage(self) -> float:
+        """Jaka czesc kwadratu kratki zajmuje kropka (0..1)."""
+        return max(0.0, min(1.0, self.level / float(MASK_LEVELS)))
+
+    @property
+    def dot_side(self) -> int:
+        """Bok kropki w pikselach (1..cell)."""
+        return dot_side(self.cell, self.level)
+
+
+#: Rastry od najdelikatniejszego do najmocniejszego (rozne siatki i gestosci).
+HALFTONES: tuple[Halftone, ...] = (
+    Halftone("hair", 2, 2, 110),
+    Halftone("veil", 3, 4, 105),
+    Halftone("soft", 3, 9, 115),
+    Halftone("light", 4, 14, 120),
+    Halftone("mid", 4, 22, 130),
+    Halftone("strong", 3, 34, 145),
+    Halftone("dense", 2, 48, 155),
+    Halftone("solid", 2, 64, 210),
+    Halftone("coarse", 6, 9, 100),
+    Halftone("coarse_mid", 6, 22, 110),
+)
+
+HALFTONE_BY_NAME: dict[str, Halftone] = {item.name: item for item in HALFTONES}
+
+#: Kolejne intensywnosci rastra (0..64) - do gradientow, animacji i testow.
+HALFTONE_INTENSITIES: tuple[int, ...] = (2, 4, 8, 12, 18, 26, 36, 48, 64)
+#: Domyslny zestaw warstw rastra na powierzchni (drobny + gruby).
+SCREEN_STACK: tuple[str, ...] = ("hair",)
+#: Warstwy rastra na wiekszych powierzchniach (karta moze byc bogatsza).
+SCREEN_STACK_RICH: tuple[str, ...] = ("veil", "coarse")
+#: Najciensze warstwy tla: bardzo rzadkie, grube rastry (ledwo widoczne).
+SCREEN_STACK_BACKDROP: tuple[str, ...] = ("whisper", "whisper_coarse")#: Krycie rastra na powierzchniach (karty, kafle) - kropka ma byc tlem, nie brokatem.
+SCREEN_ALPHA_SURFACE = 38
+#: Krycie rastra na tle okna i na pasku nawigacji.
+SCREEN_ALPHA_BACKDROP = 55
+#: Krycie rastra w danych (wykresy, heatmapa) - tam rastr jest trescia.
+SCREEN_ALPHA_DATA = 90
+
+_SCREEN_CACHE: dict[tuple[int, int, str, int], QPixmap] = {}
+
+
+def dot_side(cell: int, level: int) -> int:
+    """Bok kropki rastra dla ``level`` z 64 stopni (1..cell)."""
+    size = max(1, int(cell))
+    step = max(0, min(MASK_LEVELS, int(level)))
+    if step <= 0:
+        return 0
+    return max(1, min(size, int(round(size * (step / float(MASK_LEVELS)) ** 0.5))))
+
+
+def halftone(name: str) -> Halftone:
+    """Rastr po nazwie; nieznana nazwa spada na ``soft``."""
+    return HALFTONE_BY_NAME.get(str(name), HALFTONE_BY_NAME["soft"])
+
+
+def halftone_pixmap(
+    name: str | None = None,
+    *,
+    cell: int | None = None,
+    level: int | None = None,
+    alpha: int | None = None,
+    tint: str | None = None,
+) -> QPixmap:
+    """Kafelek rastra: jedna kropka na kratke ``cell x cell`` (cache'owany)."""
+    spec = halftone(name or "soft")
+    cell_value = max(2, int(cell if cell is not None else spec.cell))
+    level_value = max(0, min(MASK_LEVELS, int(level if level is not None else spec.level)))
+    alpha_value = max(0, min(255, int(alpha if alpha is not None else spec.alpha)))
+    tint_value = str(tint if tint is not None else spec.tint)
+    key = (cell_value, level_value, tint_value, alpha_value)
+    cached = _SCREEN_CACHE.get(key)
+    if cached is not None:
+        return cached
+    pixmap = QPixmap(cell_value, cell_value)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    side = dot_side(cell_value, level_value)
+    if side > 0 and alpha_value > 0:
+        offset = (cell_value - side) // 2
+        painter = QPainter(pixmap)
+        painter.fillRect(offset, offset, side, side, qcolor(tint_value, alpha_value))
+        painter.end()
+    _SCREEN_CACHE[key] = pixmap
+    return pixmap
+
+
+def paint_halftone(
+    painter: QPainter,
+    rect: QRectF,
+    name: str = "hair",
+    *,
+    opacity: float = 1.0,
+    phase: int = 0,
+    tint: str | None = None,
+    cell: int | None = None,
+    level: int | None = None,
+    alpha: int | None = None,
+    clip: QPainterPath | QRectF | None = None,
+) -> None:
+    """Powiela rastr na ``rect`` (kropki w rownych odstepach)."""
+    area = QRectF(rect)
+    if area.isEmpty() or opacity <= 0.01:
+        return
+    painter.save()
+    _apply_clip(painter, area, clip)
+    painter.setOpacity(max(0.0, min(1.0, float(opacity))))
+    tile = halftone_pixmap(name, cell=cell, level=level, alpha=alpha, tint=tint)
+    offset = QPoint(int(phase) % max(1, tile.width()), int(phase) % max(1, tile.height()))
+    painter.drawTiledPixmap(area.toRect(), tile, offset)
+    painter.restore()
+
+
+# ------------------------------------------------------------- rzadki rastr
+#: Rzadkie, grube rastry tla: ``(bok kropki px, pozycje z 64, alfa)``.
+#: Kropka stoi tylko na 1 z 64 pozycji siatki, wiec na ekranie widac pojedyncze
+#: punktowania rozstawione co kilkadziesiat pikseli - ledwo widoczna warstwa.
+SPARSE_SCREENS: dict[str, tuple[int, int, int]] = {
+    "whisper": (4, 1, 18),
+    "whisper_coarse": (8, 1, 14),
+}
+#: Kolejnosc warstw rzadkiego rastra na tle okna.
+SCREEN_STACK_BACKDROP: tuple[str, ...] = ("whisper", "whisper_coarse")
+
+
+def sparse_pixmap(
+    name: str = "whisper",
+    *,
+    tint: str | None = None,
+    alpha: int | None = None,
+) -> QPixmap:
+    """Kafelek rzadkiego rastra: osiem pozycji na bok, zapalone wg Bayera 8x8."""
+    dot, level, alpha_default = SPARSE_SCREENS.get(str(name), SPARSE_SCREENS["whisper"])
+    dot_value = max(2, int(dot))
+    step = max(0, min(MASK_LEVELS, int(level)))
+    alpha_value = max(0, min(255, int(alpha if alpha is not None else alpha_default)))
+    tint_value = str(tint or "text")
+    size = dot_value * 8
+    key = (size, step, tint_value, alpha_value)
+    cached = _SCREEN_CACHE.get(key)
+    if cached is not None:
+        return cached
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    if step > 0 and alpha_value > 0:
+        from .paint import BAYER8
+
+        painter = QPainter(pixmap)
+        dot_color = qcolor(tint_value, alpha_value)
+        for by in range(8):
+            row = BAYER8[by]
+            for bx in range(8):
+                if row[bx] < step:
+                    painter.fillRect(bx * dot_value, by * dot_value, dot_value, dot_value, dot_color)
+        painter.end()
+    _SCREEN_CACHE[key] = pixmap
+    return pixmap
+
+
+def paint_sparse(
+    painter: QPainter,
+    rect: QRectF,
+    name: str = "whisper",
+    *,
+    opacity: float = 1.0,
+    phase: int = 0,
+    tint: str | None = None,
+    alpha: int | None = None,
+    clip: QPainterPath | QRectF | None = None,
+) -> None:
+    """Powiela rzadki rastr na ``rect`` (pojedyncze kropki co kilkadziesiat px)."""
+    area = QRectF(rect)
+    if area.isEmpty() or opacity <= 0.01:
+        return
+    painter.save()
+    _apply_clip(painter, area, clip)
+    painter.setOpacity(max(0.0, min(1.0, float(opacity))))
+    tile = sparse_pixmap(name, tint=tint, alpha=alpha)
+    offset = QPoint(int(phase) % max(1, tile.width()), int(phase * 3) % max(1, tile.height()))
+    painter.drawTiledPixmap(area.toRect(), tile, offset)
+    painter.restore()
+
+
+def paint_sparse_stack(
+    painter: QPainter,
+    rect: QRectF,
+    names: tuple[str, ...] | list[str] = SCREEN_STACK_BACKDROP,
+    *,
+    opacity: float = 1.0,
+    tint: str | None = None,
+    alpha: int | None = None,
+    clip: QPainterPath | QRectF | None = None,
+    phase_shift: int = 7,
+) -> None:
+    """Naklada kilka rzadkich rastrow (rozne kropki i rozne rozstawy)."""
+    for index, name in enumerate(names):
+        paint_sparse(
+            painter,
+            rect,
+            name,
+            opacity=opacity,
+            phase=index * int(phase_shift),
+            tint=tint,
+            alpha=alpha,
+            clip=clip,
+        )
+
+
+def paint_screen_stack(
+    painter: QPainter,
+    rect: QRectF,
+    names: tuple[str, ...] | list[str] = SCREEN_STACK,
+    *,
+    opacity: float = 1.0,
+    tint: str | None = None,
+    alpha: int | None = None,
+    clip: QPainterPath | QRectF | None = None,
+    phase_shift: int = 3,
+) -> None:
+    """Naklada kilka rastrow o roznych siatkach (wielowarstwowa faktura)."""
+    for index, name in enumerate(names):
+        paint_halftone(
+            painter,
+            rect,
+            name,
+            opacity=opacity,
+            phase=index * int(phase_shift),
+            tint=tint,
+            alpha=alpha,
+            clip=clip,
+        )
 
 
 def _apply_clip(painter: QPainter, rect: QRectF, clip: QPainterPath | QRectF | None) -> None:
@@ -257,15 +509,60 @@ def paint_grain_fade(
     gradientem - dzieki temu warstwa konczy sie plynnie i nie zostawia linii,
     jakiej nie da sie uniknac, przycinajac kafelek do polowy widgetu.
     """
+    _paint_tile_fade(painter, rect, grain_pixmap(name), fade=fade, span=span, opacity=opacity, clip=clip)
+
+
+def paint_halftone_fade(
+    painter: QPainter,
+    rect: QRectF,
+    name: str = "soft",
+    *,
+    fade: str = "bottom",
+    span: float = 0.6,
+    opacity: float = 1.0,
+    cell: int | None = None,
+    level: int | None = None,
+    alpha: int | None = None,
+    tint: str | None = None,
+    clip: QPainterPath | QRectF | None = None,
+) -> None:
+    """Rastr z maska: kropki pojawiaja sie stopniowo (płynna intensywność).
+
+    To odpowiedz na "wiecej roznych intensywnosci": zamiast kilku stalych
+    gestosci rastra, jedna warstwa przechodzi plynnie od kropek pelnych do
+    zera (albo odwrotnie).
+    """
+    _paint_tile_fade(
+        painter,
+        rect,
+        halftone_pixmap(name, cell=cell, level=level, alpha=alpha, tint=tint),
+        fade=fade,
+        span=span,
+        opacity=opacity,
+        clip=clip,
+    )
+
+
+def _paint_tile_fade(
+    painter: QPainter,
+    rect: QRectF,
+    tile: QPixmap,
+    *,
+    fade: str,
+    span: float,
+    opacity: float,
+    clip: QPainterPath | QRectF | None,
+) -> None:
+    """Wspolny mechanizm wygaszania kafelka (ziarno i rastr)."""
     area = QRectF(rect)
-    if area.isEmpty() or opacity <= 0.01:
+    if area.isEmpty() or opacity <= 0.01 or tile.isNull():
         return
     width = max(1, int(ceil(area.width())))
     height = max(1, int(ceil(area.height())))
     image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
     image.fill(Qt.GlobalColor.transparent)
     layer = QPainter(image)
-    layer.drawTiledPixmap(QRect(0, 0, width, height), grain_pixmap(name))
+    layer.drawTiledPixmap(QRect(0, 0, width, height), tile)
     layer.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
     layer.setPen(Qt.PenStyle.NoPen)
     layer.setBrush(QBrush(_fade_gradient(QRectF(0, 0, width, height), fade, span)))
@@ -286,7 +583,7 @@ def rounded_path(rect: QRectF, radius: float) -> QPainterPath:
 
 
 def clip_for(rect: QRectF, radius: float, *, inset: float = 0.0) -> QPainterPath | QRectF:
-    """KsztaĹ‚t clippingu: zaokraglony prostokat albo sam prostokat."""
+    """Ksztalt clippingu: zaokraglony prostokat albo sam prostokat."""
     area = QRectF(rect).adjusted(inset, inset, -inset, -inset)
     if radius > 0.0:
         return rounded_path(area, radius)
@@ -301,19 +598,44 @@ def paint_surface(
     names: tuple[str, ...] | list[str] = SURFACE_STACK,
     opacity: float = 0.7,
     tint: str | None = None,
+    screens: tuple[str, ...] | list[str] = SCREEN_STACK,
+    screen_opacity: float = 0.85,
+    screen_tint: str | None = None,
+    screen_alpha: int | None = SCREEN_ALPHA_SURFACE,
 ) -> None:
-    """Ziarno powierzchni (karta, panel, pigulka), przyciete do zaokraglenia.
+    """Ziarno + rastr powierzchni (karta, panel, pigulka), przyciete do zaokraglenia.
 
-    Nic nie wychodzi poza obramowanie widgetu malowane przez QSS.
+    Kazda powierzchnia jest wielowarstwowa: najpierw ziarno (szum), a na nim
+    jeden lub dwa rastry o roznych siatkach. Nic nie wychodzi poza obramowanie
+    widgetu malowane przez QSS.
     """
     area = QRectF(rect)
     if area.isEmpty():
         return
-    paint_stack(painter, area, names, opacity=opacity, tint=tint, clip=clip_for(area, radius))
+    clip = clip_for(area, radius)
+    paint_stack(painter, area, names, opacity=opacity, tint=tint, clip=clip)
+    if screens:
+        paint_screen_stack(
+            painter,
+            area,
+            screens,
+            opacity=screen_opacity,
+            tint=screen_tint,
+            alpha=screen_alpha,
+            clip=clip,
+        )
 
 
-def paint_dialog_background(painter: QPainter, rect: QRectF, *, opacity: float = 0.9) -> None:
-    """Tlo dialogu modalnego: ten sam stos ziarna, co tlo glownego okna.
+def paint_dialog_background(
+    painter: QPainter,
+    rect: QRectF,
+    *,
+    opacity: float = 0.9,
+    screens: tuple[str, ...] | list[str] = SCREEN_STACK_RICH,
+    screen_opacity: float = 0.8,
+    screen_alpha: int | None = SCREEN_ALPHA_BACKDROP,
+) -> None:
+    """Tlo dialogu modalnego: ziarno + rastr, jak tlo glownego okna.
 
     Dialogi nie stoja na tle okna (maja wlasna powierzchnie), wiec bez tego
     wypadaly z reszty interfejsu jako plaska czern.
@@ -323,6 +645,9 @@ def paint_dialog_background(painter: QPainter, rect: QRectF, *, opacity: float =
         return
     painter.fillRect(area, qcolor("bg"))
     paint_stack(painter, area, BACKDROP_STACK, opacity=opacity)
+    if screens:
+        paint_screen_stack(painter, area, screens, opacity=screen_opacity, alpha=screen_alpha)
+    paint_grain(painter, area, "dust", phase=9, opacity=0.8)
 
 
 def grains_report() -> str:
@@ -334,26 +659,56 @@ def grains_report() -> str:
     )
 
 
+def halftones_report() -> str:
+    """Krotki opis rastrow (diagnostyka, testy, raport CLI)."""
+    return "; ".join(
+        f"{item.name}: siatka {item.cell}px, kropka {item.dot_side}px "
+        f"({item.coverage:.0%}), alfa {item.alpha}"
+        for item in HALFTONES
+    )
+
+
 __all__ = [
     "BACKDROP_STACK",
     "GRAINS",
     "GRAINS_BY_NAME",
     "Grain",
+    "HALFTONES",
+    "HALFTONE_BY_NAME",
+    "HALFTONE_INTENSITIES",
+    "Halftone",
     "LADDER",
     "MASK_LEVELS",
     "PHASE_STEP",
+    "SCREEN_ALPHA_BACKDROP",
+    "SCREEN_ALPHA_DATA",
+    "SCREEN_ALPHA_SURFACE",
+    "SCREEN_STACK",
+    "SCREEN_STACK_BACKDROP",
+    "SCREEN_STACK_RICH",
     "SOFT_STACK",
+    "SPARSE_SCREENS",
     "SURFACE_STACK",
     "clear_cache",
     "clip_for",
+    "dot_side",
     "grain",
     "grain_pixmap",
     "grains_report",
+    "halftone",
+    "halftone_pixmap",
+    "halftones_report",
     "ladder",
     "paint_dialog_background",
     "paint_grain",
     "paint_grain_fade",
+    "paint_halftone",
+    "paint_halftone_fade",
+    "paint_screen_stack",
+    "paint_sparse",
+    "paint_sparse_stack",
     "paint_stack",
     "paint_surface",
     "rounded_path",
+    "sparse_pixmap",
 ]

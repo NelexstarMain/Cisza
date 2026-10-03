@@ -206,10 +206,11 @@ class MonochromeChart(QWidget):
 
     # -------------------------------------------------------------- malowanie
     def _paint_plot_texture(self, painter: QPainter, plot: QRectF) -> None:
-        """Tlo pola wykresu: dwa poziomy ziarna (bez linii pomocniczych)."""
+        """Tlo pola wykresu: dwa poziomy ziarna + dwa rastry (warstwowo)."""
         if plot.width() < 8.0 or plot.height() < 8.0:
             return
         texture.paint_stack(painter, plot, ("medium", "sand", "clump"), opacity=0.5)
+        texture.paint_screen_stack(painter, plot, ("hair", "coarse"), opacity=0.55)
 
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
         painter = QPainter(self)
@@ -583,9 +584,10 @@ class Heatmap(QWidget):
         cell = self.cell_size()
         plot = self.plot_rect()
         # Miedzy komorkami zostaje 1 px przerwy - zamiast plaskiej plamy lezy tam
-        # ziarno (z grudkami), wiec siatka heatmapy czyta sie jak material.
+        # ziarno i rastr, wiec siatka heatmapy czyta sie jak material.
         if plot.width() >= 8.0 and plot.height() >= 8.0:
             texture.paint_stack(painter, plot, ("medium", "sand", "clump"), opacity=0.5)
+            texture.paint_screen_stack(painter, plot, ("veil", "coarse"), opacity=0.5)
         for row_index, row in enumerate(self._matrix):
             for col_index in range(cols):
                 value = row[col_index] if col_index < len(row) else 0.0

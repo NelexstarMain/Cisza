@@ -572,24 +572,36 @@ class NavRail(QWidget):
         painter.drawRoundedRect(QRectF(self.WALL_X, top, self.WALL_W, height), 1.0, 1.0)
 
     def _paint_rail_texture(self, painter: QPainter) -> None:
-        """Materiał paska: gestrzy stos ziarna + sciana z drobniejszym ziarnem.
+        """Materiał paska: ziarno + dwa rastry, a przy scianie gestszy rastr.
 
-        Pasek lezy na tle okna, wiec dodatkowe ziarno robi z niego odrebny
-        "panel" (te same poziomy co tlo, ale zagęszczone), a przy scianie
-        ziarno przechodzi plynnie w drobniejsze - bez widocznego progu.
+        Pasek lezy na tle okna, wiec dodatkowe warstwy robia z niego odrebny
+        "panel": ziarno, drobny rastr i gruby rastr o innej siatce, a przy
+        scianie rastr gestnieje plynnie (maska), bez widocznego progu.
         """
         rect = QRectF(self.rect())
         if rect.width() < 8.0 or rect.height() < 8.0:
             return
         texture.paint_stack(painter, rect, ("medium", "fine", "sand", "clump"), opacity=0.55)
-        brush_width = min(20.0, max(8.0, rect.width() * 0.2))
+        texture.paint_screen_stack(
+            painter, rect, ("veil", "coarse"), opacity=0.8, alpha=texture.SCREEN_ALPHA_BACKDROP
+        )
+        brush_width = min(24.0, max(10.0, rect.width() * 0.24))
+        texture.paint_halftone_fade(
+            painter,
+            QRectF(rect.left(), rect.top(), brush_width, rect.height()),
+            "soft",
+            fade="right",
+            span=1.0,
+            opacity=0.7,
+            level=12,
+        )
         texture.paint_grain_fade(
             painter,
             QRectF(rect.left(), rect.top(), brush_width, rect.height()),
             "fine",
             fade="right",
             span=1.0,
-            opacity=0.6,
+            opacity=0.5,
         )
 
     def _paint_hover(self, painter: QPainter, height: float) -> None:
@@ -624,9 +636,10 @@ class NavRail(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(self._pill_gradient(bounds.top(), bounds.bottom())))
         painter.drawPath(path)
-        # Pigulka jest z tego samego materialu co pasek - drobne ziarno pod jej
-        # obramowaniem, wiec nie wyglada jak plastikowy prostokat na tle.
+        # Pigulka jest z tego samego materialu co pasek - drobne ziarno i rastr
+        # pod jej obramowaniem, wiec nie wyglada jak plastikowy prostokat.
         texture.paint_grain(painter, bounds, "sand", phase=3, opacity=0.75, clip=path)
+        texture.paint_halftone(painter, bounds, "hair", phase=2, opacity=0.8, clip=path)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(pen("line_strong"))
         painter.drawPath(path)

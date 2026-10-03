@@ -164,7 +164,7 @@ def test_qss_stays_monochrome():
 
 # --------------------------------------------------------------------- 4. wyglad
 def test_backdrop_is_grain_not_grid():
-    """Tlo okna to samo ziarno - bez linii i bez rytmu siatki."""
+    """Tlo okna: ziarno + ledwo widoczny rzadki rastr, bez linii i bez siatki."""
     qt = pytest.importorskip("PyQt6.QtWidgets")
     app_module = pytest.importorskip("focuslock.app")
 
@@ -174,17 +174,29 @@ def test_backdrop_is_grain_not_grid():
     image = backdrop.grab().toImage()
     assert not image.isNull()
 
-    # ziarno jest: kilka poziomow jasnosci, ale wszystko ciemne (max 64)
     values = [image.pixelColor(x, y).red() for y in range(0, 200) for x in range(0, 320)]
     levels = len(set(values))
-    assert levels >= 8, f"ziarno ma zbyt malo poziomow: {levels}"
-    assert max(values) <= 64, f"ziarno jest za mocne: {max(values)}"
+    mean = sum(values) / len(values)
+    assert levels >= 8, f"tlo ma zbyt malo poziomow: {levels}"
+    assert max(values) <= 72, f"tlo jest za mocne: {max(values)}"
+    assert mean <= 14.0, f"tlo jest za jasne (srednia {mean:.1f})"
 
-    # siatki nie ma: zadna kolumna ani wiersz nie odcina sie rytmicznie
-    columns = [sum(image.pixelColor(x, y).red() for y in range(200)) / 200.0 for x in range(320)]
-    rows = [sum(image.pixelColor(x, y).red() for x in range(320)) / 320.0 for y in range(200)]
-    assert max(columns) - min(columns) < 8.0, "w tle widac pionowe linie (siatka)"
-    assert max(rows) - min(rows) < 8.0, "w tle widac poziome linie (siatka)"
+    # linii nie ma: zaden wiersz ani kolumna nie jest rozjasniony na calej dlugosci
+    # (rzadkie kropki rastra rozjasniaja tylko kilka procent dlugosci)
+    for y in range(200):
+        bright = sum(1 for x in range(320) if image.pixelColor(x, y).red() > 20)
+        assert bright < 0.6 * 320, f"w tle widac pozioma linie (wiersz {y})"
+    for x in range(320):
+        bright = sum(1 for y in range(200) if image.pixelColor(x, y).red() > 20)
+        assert bright < 0.6 * 200, f"w tle widac pionowa linie (kolumna {x})"
+
+    # rzadki rastr jest: kropka w narozniku siatki 32 px (whisper) jest wyraznie
+    # jasniejsza od typowego tla, a wzor powtarza sie co 32 px
+    typical = sorted(values)[len(values) // 2]
+    assert image.pixelColor(1, 1).red() > typical + 8, (
+        f"brak rzadkiego rastra tla ({image.pixelColor(1, 1).red()} vs mediana {typical})"
+    )
+    assert image.pixelColor(33, 1).red() > typical, "rzadki rastr nie powtarza sie co 32 px"
     _ = app
 
 

@@ -176,11 +176,12 @@ class Screen(QWidget):
 
     # ------------------------------------------------------------------ API
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
-        """Pasek naglowka kazdego ekranu dostaje wlasny poziom ziarna.
+        """Pasek naglowka kazdego ekranu dostaje dwie wlasne warstwy faktury.
 
-        Tlo okna ma stos ziarna; naglowek strony dokłada drobniejsze ziarno,
-        ktore wygasa w dol (maska gradientowa), wiec tytul strony siedzi na
-        "materiale", a nie na plaskiej czerni - i nie ma widocznego progu.
+        Tlo okna ma stos ziarna i najcienszy rastr; naglowek strony dokłada
+        drobniejsze ziarno oraz rastr, ktore wygasaja w dol (maska gradientowa),
+        wiec tytul strony siedzi na "materiale", a nie na plaskiej czerni -
+        i nie ma widocznego progu.
         """
         super().paintEvent(event)
         painter = QPainter(self)
@@ -191,6 +192,24 @@ class Screen(QWidget):
         band = QRectF(rect.left(), rect.top(), rect.width(), min(72.0, rect.height() * 0.3))
         texture.paint_grain_fade(painter, band, "fine", fade="bottom", span=1.0, opacity=0.5)
         texture.paint_grain_fade(painter, band, "clump", fade="bottom", span=0.7, opacity=0.4)
+        texture.paint_halftone_fade(
+            painter,
+            band,
+            "veil",
+            fade="bottom",
+            span=1.0,
+            opacity=0.85,
+            alpha=texture.SCREEN_ALPHA_BACKDROP,
+        )
+        texture.paint_halftone_fade(
+            painter,
+            band,
+            "coarse",
+            fade="bottom",
+            span=0.55,
+            opacity=0.7,
+            alpha=texture.SCREEN_ALPHA_BACKDROP,
+        )
         painter.end()
 
     def _build(self) -> None:

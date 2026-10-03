@@ -13,6 +13,7 @@ from PyQt6.QtGui import QFontMetrics, QPainter, QPainterPath
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 from ..theme import FONT_SIZES
+from . import texture
 from .paint import clamp01, fill_dither, mono_font, pen, qcolor, ui_font
 
 #: Minimalna srednica, przy ktorej pierscien jest jeszcze czytelny.
@@ -217,12 +218,21 @@ class RingProgress(QWidget):
         painter.drawArc(mid_rect, 0, 360 * 16)
 
         # 3. Drobna faktura na torze (cell=2); luk postepu przykrywa ja pozniej,
-        #    wiec tekstura zostaje tylko na czesci niepostepowej.
-        texture = QPainterPath()
-        texture.setFillRule(Qt.FillRule.OddEvenFill)
-        texture.addEllipse(outer_rect)
-        texture.addEllipse(inner_rect)
-        fill_dither(painter, texture, "text_mute", 0.12, cell=2)
+        #    wiec tekstura zostaje tylko na czesci niepostepowej. Rastr ma teraz
+        #    64 stopnie, a na nim lezy drugi, grubszy rastr o innej siatce.
+        texture_path = QPainterPath()
+        texture_path.setFillRule(Qt.FillRule.OddEvenFill)
+        texture_path.addEllipse(outer_rect)
+        texture_path.addEllipse(inner_rect)
+        fill_dither(painter, texture_path, "text_mute", 0.12, cell=2)
+        texture.paint_screen_stack(
+            painter,
+            outer_rect,
+            ("hair", "coarse"),
+            opacity=0.9,
+            alpha=texture.SCREEN_ALPHA_DATA,
+            clip=texture_path,
+        )
 
         # 4. Luk postepu (zgodnie z ruchem wskazowek zegara od godziny 12).
         if self._value > 0.0:

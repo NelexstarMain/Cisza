@@ -33,6 +33,13 @@ def _bayer(order: int) -> tuple[tuple[int, ...], ...]:
 
 BAYER4: tuple[tuple[int, ...], ...] = _bayer(4)
 
+#: Wzor 8x8: 64 stopnie krycia zamiast 16. Uzywany wszędzie tam, gdzie gestosc
+#: ma sie zmieniac plynnie (rastr halftone, heatmapa, paski, pierscien).
+BAYER8: tuple[tuple[int, ...], ...] = _bayer(8)
+
+#: Domyslna liczba stopni rastra (`dither_brush`).
+DITHER_LEVELS = 64
+
 _BRUSH_CACHE: dict[tuple, QBrush] = {}
 
 #: Mapowanie wag numerycznych (CSS/QSS) na `QFont.Weight`.
@@ -99,11 +106,26 @@ def gray_level(amount: float, low: str = "surface2", high: str = "text") -> QCol
     )
 
 
-def dither_brush(color: str, density: float, cell: int = 4, bg: str | None = None) -> QBrush:
-    """Pędzel z wzorem Bayera 4x4 o kryciu `density` (0..1)."""
-    step = round(max(0.0, min(1.0, float(density))) * 16)
-    size = max(2, int(cell))
-    key = (color, step, size, bg)
+def dither_brush(
+    color: str,
+    density: float,
+    cell: int = 4,
+    bg: str | None = None,
+    levels: int = DITHER_LEVELS,
+) -> QBrush:
+    """Pędzel z rastrem (uporządkowane kropki) o kryciu `density` (0..1).
+
+    ``cell`` to bok kropki rastra (px), a wzór ma pelny okres macierzy (8x8 dla
+    ``levels=64``), wiec gestosc ma naprawde 64 stopnie, a nie 16 - dopiero to
+    daje plynne przejscia na heatmapie, paskach i torze pierscienia.
+    """
+    steps = DITHER_LEVELS if int(levels) >= 64 else 16
+    matrix = BAYER8 if steps == DITHER_LEVELS else BAYER4
+    span = len(matrix)
+    dot = max(1, int(cell))
+    size = dot * span
+    step = round(max(0.0, min(1.0, float(density))) * steps)
+    key = (color, step, dot, bg, steps)
     cached = _BRUSH_CACHE.get(key)
     if cached is not None:
         return cached
@@ -113,10 +135,11 @@ def dither_brush(color: str, density: float, cell: int = 4, bg: str | None = Non
     painter.setPen(Qt.PenStyle.NoPen)
     painter.setBrush(qcolor(color))
     threshold = step + 0.5
-    for y in range(size):
-        for x in range(size):
-            if BAYER4[y % 4][x % 4] < threshold:
-                painter.drawRect(x, y, 1, 1)
+    for by in range(span):
+        row = matrix[by]
+        for bx in range(span):
+            if row[bx] < threshold:
+                painter.drawRect(bx * dot, by * dot, dot, dot)
     painter.end()
     brush = QBrush(pixmap)
     _BRUSH_CACHE[key] = brush
@@ -130,11 +153,12 @@ def fill_dither(
     density: float,
     cell: int = 4,
     bg: str | None = None,
+    levels: int = DITHER_LEVELS,
 ) -> None:
-    """Wypelnia obszar ditheringiem o zadanym kryciu."""
+    """Wypelnia obszar rastrem o zadanym kryciu (64 stopnie domyslnie)."""
     painter.save()
     painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(dither_brush(color, density, cell, bg))
+    painter.setBrush(dither_brush(color, density, cell, bg, levels))
     if isinstance(shape, QPainterPath):
         painter.drawPath(shape)
     else:

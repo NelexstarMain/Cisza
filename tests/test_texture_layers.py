@@ -1,13 +1,15 @@
-"""Testy ziarna tla: rodzaje, poziomy, cache i miejsca uzycia.
+"""Testy faktury: ziarno, rastr (halftone), poziomy, cache i miejsca uzycia.
 
-Pilnuje czterech rzeczy:
+Pilnuje pieciu rzeczy:
 
-1. **rodzaje** - ziarno ma kilka charakterow (piksele, grudki, pylki, ciemny
+1. **rodzaje ziarna** - kilka charakterow (piksele, grudki, pylki, ciemny
    pieprz), a kazdy z nich zostaje szary (R == G == B),
 2. **poziomy** - od ``sand`` do ``coarse`` rosnie i kafelek, i krycie wzoru,
    a deklarowane krycie zgadza sie z pikselami kafelka,
-3. **cache i koszt** - kafelek liczy sie raz (ta sama instancja `QPixmap`),
-4. **miejsca** - ziarno jest nakladane nie tylko na tlo okna, ale tez na karty,
+3. **rastr (halftone)** - kropki na stalej siatce, od kilku do 64 stopni
+   intensywnosci, z warstwami i wygaszaniem (bez widocznego progu),
+4. **cache i koszt** - kafelek liczy sie raz (ta sama instancja `QPixmap`),
+5. **miejsca** - faktura jest nakladana nie tylko na tlo okna, ale tez na karty,
    puste stany, plakietki, komunikaty, kafle, pasek nawigacji, wykresy, kontrolki
    i dialogi (statyczny skan zrodel).
 
@@ -154,6 +156,130 @@ def test_grain_has_no_horizontal_stripes(app):
     assert min(means) > 0.0
 
 
+# ------------------------------------------------------------ rastr/halftone
+def test_halftone_has_many_intensities(app):
+    """Rastr ma wiele stopni intensywnosci, a kropka rosnie razem z poziomem."""
+    tx = _tx()
+    assert len(tx.HALFTONES) >= 10, f"za malo rastrow: {len(tx.HALFTONES)}"
+    assert len(tx.HALFTONE_INTENSITIES) >= 8, "za malo stopni intensywnosci"
+    assert list(tx.HALFTONE_INTENSITIES) == sorted(tx.HALFTONE_INTENSITIES)
+
+    sides = [tx.dot_side(6, level) for level in tx.HALFTONE_INTENSITIES]
+    assert sides == sorted(sides), f"kropka nie rosnie z intensywnoscia: {sides}"
+    assert sides[0] < sides[-1], "skala intensywnosci jest plaska"
+    assert tx.dot_side(6, 0) == 0, "zerowy poziom nie moze zostawiac kropki"
+    assert tx.dot_side(6, tx.MASK_LEVELS) == 6, "pelny poziom to pelna kratka"
+
+    scheme = [item.cell for item in tx.HALFTONES]
+    assert min(scheme) >= 2 and max(scheme) <= 12, f"dziwne siatki rastra: {scheme}"
+
+
+def test_halftone_tiles_are_gray_and_regular(app):
+    """Kafelki rastra sa szare, a kropka lezy w swoim kwadracie kratki."""
+    tx = _tx()
+    for item in tx.HALFTONES:
+        image = tx.halftone_pixmap(item.name).toImage()
+        assert image.width() == item.cell and image.height() == item.cell
+        lit = [
+            (x, y)
+            for y in range(image.height())
+            for x in range(image.width())
+            if image.pixelColor(x, y).alpha() > 0
+        ]
+        for x, y in lit:
+            assert _is_gray(image.pixelColor(x, y)), f"{item.name}: kropka nie jest szara"
+        if item.dot_side <= 0:
+            continue
+        assert lit, f"{item.name}: brak kropki w kafelku"
+        xs = [x for x, _ in lit]
+        ys = [y for _, y in lit]
+        assert max(xs) - min(xs) + 1 == item.dot_side, f"{item.name}: kropka nie jest kwadratem"
+        assert max(ys) - min(ys) + 1 == item.dot_side, f"{item.name}: kropka nie jest kwadratem"
+
+
+def test_sparse_backdrop_screen_is_rare(app):
+    """Rzadki rastr tla: jedna kropka na 64 pozycje siatki (ledwo widoczny)."""
+    tx = _tx()
+    assert set(tx.SPARSE_SCREENS) >= {"whisper", "whisper_coarse"}
+    for name, (dot, level, alpha) in tx.SPARSE_SCREENS.items():
+        assert dot >= 4, f"{name}: kropka ma byc gruba"
+        assert level == 1, f"{name}: kropka ma stac na 1 z 64 pozycji"
+        assert alpha <= 36, f"{name}: rzadki rastr nie moze byc jasny (alfa {alpha})"
+        image = tx.sparse_pixmap(name).toImage()
+        assert image.width() == dot * 8, f"{name}: kafelek ma obejmowac cala siatke"
+        lit = sum(
+            1
+            for y in range(image.height())
+            for x in range(image.width())
+            if image.pixelColor(x, y).alpha() > 0
+        )
+        assert lit == dot * dot, f"{name}: w kafelku ma byc dokladnie jedna kropka ({lit} px)"
+
+
+def test_screen_stack_adds_layers(app):
+    from PyQt6.QtCore import QRectF
+
+    tx = _tx()
+    rect = QRectF(0.0, 0.0, 160.0, 120.0)
+    plain = _render(160, 120, lambda p: tx.paint_halftone(p, rect, "hair"))
+    layered = _render(
+        160,
+        120,
+        lambda p: tx.paint_screen_stack(p, rect, ("hair", "coarse"), alpha=tx.SCREEN_ALPHA_DATA),
+    )
+
+    def brightness(image) -> int:
+        return sum(image.pixelColor(x, y).red() for y in range(120) for x in range(160))
+
+    assert brightness(layered) > brightness(plain), "druga warstwa rastra nic nie dodaje"
+    assert brightness(plain) > 0, "rastr nie maluje sie wcale"
+    for y in range(0, 120, 4):
+        for x in range(0, 160, 4):
+            assert _is_gray(layered.pixelColor(x, y)), f"rastr nie moze zmieniac koloru ({x}, {y})"
+
+
+def test_halftone_fade_softens_the_edge(app):
+    from PyQt6.QtCore import QRectF
+
+    tx = _tx()
+    band = QRectF(0.0, 0.0, 120.0, 60.0)
+    image = _render(
+        120,
+        60,
+        lambda p: tx.paint_halftone_fade(p, band, "soft", fade="bottom", span=1.0),
+    )
+
+    def row_sum(y: int) -> int:
+        return sum(image.pixelColor(x, y).red() for x in range(120))
+
+    def band(top: int, bottom: int) -> int:
+        """Najjasniejszy wiersz w pasie (kropki leza co 3 px, wiec nie w kazdym)."""
+        return max(row_sum(y) for y in range(top, bottom))
+
+    top_band, mid_band, bottom_band = band(0, 12), band(22, 38), band(48, 60)
+    assert top_band > 0, "gorna krawedz rastra musi miec kropki"
+    assert top_band > mid_band > bottom_band, "rastr musi gasnac wzgledem maski"
+    assert bottom_band < top_band * 0.35, "dolna krawedz nie moze zostawiac progu"
+
+
+def test_dither_brush_gained_intensity_levels(app):
+    """Rastr danych ma 64 stopnie (wczesniej 16) - gestosc zmienia sie plynniej."""
+    from focuslock.ui.widgets.paint import DITHER_LEVELS, dither_brush
+
+    assert DITHER_LEVELS >= 64
+
+    def image(density: float):
+        return dither_brush("text", density, 4, bg="surface2").texture().toImage()
+
+    close = [(0.50, 0.52), (0.70, 0.72), (0.24, 0.26)]
+    for first, second in close:
+        assert image(first) != image(second), (
+            f"gestosci {first} i {second} daja ten sam rastr - brakuje stopni"
+        )
+    older = dither_brush("text", 0.50, 4, bg="surface2", levels=16)
+    assert older.texture().width() == 4 * 4, "stary wariant (16 stopni) zostaje zgodny"
+
+
 # -------------------------------------------------------------- cache, koszt
 def test_grain_pixmap_is_cached_and_cache_is_clearable(app):
     tx = _tx()
@@ -161,8 +287,11 @@ def test_grain_pixmap_is_cached_and_cache_is_clearable(app):
     assert tx.grain_pixmap("fine") is first, "kafelek musi byc cache'owany"
     assert tx.grain_pixmap("fine", alpha=5) is not first, "inne krycie = inny kafelek"
     assert tx.grain_pixmap("fine", tint="bg") is not first, "inny kolor = inny kafelek"
+    screen = tx.halftone_pixmap("soft")
+    assert tx.halftone_pixmap("soft") is screen, "kafelek rastra tez musi byc cache'owany"
     tx.clear_cache()
     assert tx.grain_pixmap("fine") is not first, "clear_cache musi wyczyscic kafle"
+    assert tx.halftone_pixmap("soft") is not screen, "clear_cache musi wyczyscic rastry"
 
 
 def test_fade_layer_is_soft_at_the_end(app):

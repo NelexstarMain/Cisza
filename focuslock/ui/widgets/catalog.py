@@ -199,14 +199,17 @@ class AppTile(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(qcolor(background))
         painter.drawRoundedRect(rect, radius, radius)
-        # Kafel jest materialem: ziarno (z grudkami) pod ramka i nazwa - bez
-        # Bayera na calym polu, bo ten zaslanial ikone i tekst.
+        # Kafel jest materialem: ziarno (z grudkami) i dwa rastry pod ramka
+        # i nazwa - bez Bayera na calym polu, bo ten zaslanial ikone i tekst.
         texture.paint_surface(
             painter,
             rect.adjusted(1.0, 1.0, -1.0, -1.0),
             radius=max(0.0, radius - 1.0),
             names=("fine", "sand", "clump"),
             opacity=0.65,
+            screens=("hair", "coarse"),
+            screen_opacity=0.85,
+            screen_alpha=texture.SCREEN_ALPHA_SURFACE,
         )
 
         if self._selected:
