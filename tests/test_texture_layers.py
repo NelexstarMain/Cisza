@@ -69,15 +69,16 @@ def test_grain_has_several_kinds_and_levels():
 
 
 def test_grain_levels_get_coarser():
-    grains = {item.name: item for item in _tx().GRAINS}
-    ladder = [_tx().grain(name) for name in _tx().LADDER]
+    tx = _tx()
+    ladder = tx.ladder()
+    assert [item.name for item in ladder] == list(tx.LADDER)
     sizes = [item.size for item in ladder]
     coverage = [item.coverage for item in ladder]
     assert sizes == sorted(sizes) and len(set(sizes)) == len(sizes), f"kafelki nie rosna: {sizes}"
     assert coverage == sorted(coverage) and len(set(coverage)) == len(coverage), (
         f"krycie nie rosnie razem z poziomem: {coverage}"
     )
-    assert grains["sand"].weight < grains["coarse"].weight
+    assert tx.grain("sand").weight < tx.grain("coarse").weight
     for item in _tx().GRAINS:
         assert item.size % item.block == 0, f"{item.name}: kafelek musi dzielic sie na grudki"
         assert 8 <= item.size <= 192, f"{item.name}: kafelek poza zakresem ({item.size})"

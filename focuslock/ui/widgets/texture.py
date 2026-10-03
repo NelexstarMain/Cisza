@@ -1,4 +1,4 @@
-﻿"""Grain tla: wiele rodzajow i poziomow ziarna (bez innych tekstur).
+"""Grain tla: wiele rodzajow i poziomow ziarna (bez innych tekstur).
 
 Wszystko, co robi ten modul, to **ziarno**: rozsypane punkty wybierane deter-
 ministycznym szumem (64 poziomy krycia), powielane z malego, cache'owanego
@@ -107,10 +107,9 @@ def grain(name: str) -> Grain:
     return GRAINS_BY_NAME.get(str(name), GRAINS_BY_NAME["fine"])
 
 
-def ladder(*names: str) -> tuple[Grain, ...]:
-    """Zamienia nazwy na obiekty :class:`Grain` (pomija nieznane)."""
-    chosen = names or LADDER
-    return tuple(GRAINS_BY_NAME[name] for name in chosen if name in GRAINS_BY_NAME)
+def ladder() -> tuple[Grain, ...]:
+    """Cztery poziomy zwyklego ziarna (bez pylkow i pieprzu), od sand do coarse."""
+    return tuple(GRAINS_BY_NAME[name] for name in LADDER)
 
 
 def _noise(x: int, y: int, seed: int) -> int:
@@ -337,11 +336,11 @@ def grains_report() -> str:
 
 __all__ = [
     "BACKDROP_STACK",
-    "MASK_LEVELS",
     "GRAINS",
     "GRAINS_BY_NAME",
     "Grain",
     "LADDER",
+    "MASK_LEVELS",
     "PHASE_STEP",
     "SOFT_STACK",
     "SURFACE_STACK",
