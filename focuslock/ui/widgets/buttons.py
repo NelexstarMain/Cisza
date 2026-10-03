@@ -1,4 +1,9 @@
-"""Przyciski i przelacznik: wylacznie tokeny motywu."""
+"""Przyciski i przelacznik: wylacznie tokeny motywu.
+
+Przyciski maja "substancje": pod kursorem rozlewa sie animowana plama
+(rozblysk zalezny od miejsca wejscia myszy), a przelacznik - lepki knob,
+ktory przy zmianie stanu rozciaga sie i odbija.
+"""
 from __future__ import annotations
 
 from PyQt6.QtCore import (
@@ -11,14 +16,78 @@ from PyQt6.QtCore import (
     pyqtProperty,
     pyqtSignal,
 )
-from PyQt6.QtGui import QBrush, QLinearGradient, QPainter, QPainterPath
+from PyQt6.QtGui import QBrush, QLinearGradient, QPainter, QPainterPath, QRadialGradient
 from PyQt6.QtWidgets import QAbstractButton, QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
 from ..theme import FONT_SIZES, SIZES, TYPO
-from .paint import dither_brush, pen, qcolor, ui_font
+from .paint import clamp01, dither_brush, gray_level, pen, qcolor, ui_font
 
 
-class PrimaryButton(QPushButton):
+class _BloomMixin:
+    """Wspolny rozblysk ("substancja") dla przyciskow.
+
+    Nie zmienia stylu z QSS: plama leci pod lub nad tlem przycisku, zaleznie od
+    roli (ghost jest przezroczysty, primary ma jasne tlo).
+    """
+
+    BLOOM_MS = 200
+
+    def _setup_bloom(self) -> None:
+        self._bloom = 0.0
+        self._bloom_x = 0.5
+        self._bloom_anim = QPropertyAnimation(self, b"bloom", self)
+        self._bloom_anim.setDuration(self.BLOOM_MS)
+        self._bloom_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+
+    def _get_bloom(self) -> float:
+        return float(self._bloom)
+
+    def _set_bloom(self, value: float) -> None:
+        self._bloom = clamp01(value)
+        self.update()
+
+    bloom = pyqtProperty(float, fget=_get_bloom, fset=_set_bloom)
+
+    def _animate_bloom(self, target: float) -> None:
+        self._bloom_anim.stop()
+        self._bloom_anim.setStartValue(float(self._bloom))
+        self._bloom_anim.setEndValue(float(target))
+        self._bloom_anim.start()
+
+    def enterEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        try:
+            position = event.position()
+            self._bloom_x = clamp01(position.x() / max(1.0, float(self.width())))
+        except Exception:  # noqa: BLE001 - starsze zdarzenia bez pozycji
+            self._bloom_x = 0.5
+        self._animate_bloom(1.0)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        self._animate_bloom(0.0)
+        super().leaveEvent(event)
+
+    def _paint_bloom(self, painter: QPainter, *, dark: bool) -> None:
+        if self._bloom <= 0.02:
+            return
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(self.rect())
+        radius = max(8.0, rect.height() * 0.75 * (0.7 + 1.5 * self._bloom))
+        center = QPointF(rect.left() + self._bloom_x * rect.width(), rect.center().y())
+        pen_color = qcolor("bg", int(46 * self._bloom)) if dark else qcolor("text", int(26 * self._bloom))
+        clear = qcolor("bg", 0) if dark else qcolor("text", 0)
+        gradient = QRadialGradient(center, radius)
+        gradient.setColorAt(0.0, pen_color)
+        gradient.setColorAt(1.0, clear)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(gradient))
+        painter.setClipRect(rect)
+        painter.drawEllipse(center, radius, radius)
+        painter.restore()
+
+
+class PrimaryButton(_BloomMixin, QPushButton):
     """Glowne wezwanie do dzialania (jasne tlo, ciemny tekst)."""
 
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
@@ -26,19 +95,35 @@ class PrimaryButton(QPushButton):
         self.setProperty("role", "primary")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(SIZES["primary"])
+        self._setup_bloom()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        # Tlo i tekst rysuje QSS, wiec plama ("substancja") leci na wierzch -
+        # krycie jest tak niskie, ze napis pozostaje czytelny.
+        super().paintEvent(event)
+        painter = QPainter(self)
+        self._paint_bloom(painter, dark=True)
+        painter.end()
 
 
-class GhostButton(QPushButton):
-    """Przycisk drugorzedny (obramowanie, bez wypelnienia)."""
+class GhostButton(_BloomMixin, QPushButton):
+    """Przycisk drugorzedny: obramowanie, a pod kursorem rozlewa sie plama."""
 
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
         super().__init__(text, parent)
         self.setProperty("role", "ghost")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(SIZES["button"])
+        self._setup_bloom()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        super().paintEvent(event)
+        painter = QPainter(self)
+        self._paint_bloom(painter, dark=False)
+        painter.end()
 
 
-class DangerButton(QPushButton):
+class DangerButton(_BloomMixin, QPushButton):
     """Akcja nieodwracalna — bez koloru, sam kontrast obramowania."""
 
     def __init__(self, text: str = "", parent: QWidget | None = None) -> None:
@@ -46,6 +131,13 @@ class DangerButton(QPushButton):
         self.setProperty("role", "danger")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(SIZES["button"])
+        self._setup_bloom()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        super().paintEvent(event)
+        painter = QPainter(self)
+        self._paint_bloom(painter, dark=False)
+        painter.end()
 
 
 def link_button(text: str = "", parent: QWidget | None = None) -> QPushButton:
@@ -73,7 +165,13 @@ def _text() -> str:
 
 
 class Toggle(QAbstractButton):
-    """Przelacznik rysowany w kodzie: tor + galka (stan = dithering vs pelny)."""
+    """Przelacznik rysowany w kodzie: tor + lepki knob.
+
+    Knob nie przeskakuje: plynie z animacja, po drodze rozciaga sie i splaszcza
+    (jak kropla ciagnieta palcem), a na koncu delikatnie odbija (OutBack).
+    """
+
+    KNOB_MS = 200
 
     def __init__(self, text: str = "", parent: QWidget | None = None, checked: bool = False) -> None:
         super().__init__(parent)
@@ -82,6 +180,33 @@ class Toggle(QAbstractButton):
         self.setText(text)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._knob = 1.0 if checked else 0.0
+        self._knob_target = self._knob
+        self._knob_anim = QPropertyAnimation(self, b"knob", self)
+        self._knob_anim.setDuration(self.KNOB_MS)
+        self._knob_anim.setEasingCurve(QEasingCurve.Type.OutBack)
+        self.toggled.connect(self._animate_knob)
+
+    def _animate_knob(self, checked: bool) -> None:
+        self._knob_target = 1.0 if checked else 0.0
+        self._knob_anim.stop()
+        if not self.isVisible():
+            # Stan ustawiany z kodu (np. wczytanie ustawien) nie animuje sie.
+            self._knob = self._knob_target
+            self.update()
+            return
+        self._knob_anim.setStartValue(float(self._knob))
+        self._knob_anim.setEndValue(float(self._knob_target))
+        self._knob_anim.start()
+
+    def _get_knob(self) -> float:
+        return float(self._knob)
+
+    def _set_knob(self, value: float) -> None:
+        self._knob = clamp01(value)
+        self.update()
+
+    knob = pyqtProperty(float, fget=_get_knob, fset=_set_knob)
 
     def sizeHint(self) -> QSize:
         width = 44
@@ -103,19 +228,29 @@ class Toggle(QAbstractButton):
         track = QRectF(0.5, top + 0.5, track_w - 1.0, track_h - 1.0)
         radius = track.height() / 2.0
         checked = self.isChecked()
+        progress = clamp01(self._knob)
         painter.setPen(pen("text_dim" if checked else "line_strong", 1.0))
-        painter.setBrush(qcolor("surface3" if checked else "surface2"))
+        # Tor tez "plynie": im blizej konca, tym jasniejszy.
+        painter.setBrush(gray_level(0.25 + 0.35 * progress, "surface2", "surface3"))
         painter.drawRoundedRect(track, radius, radius)
 
         knob_d = track_h - 6.0
-        x = track.right() - 3.0 - knob_d if checked else track.left() + 3.0
-        knob = QRectF(x, top + 3.0, knob_d, knob_d)
+        # Rozciagniecie w polowie drogi (0 na koncach, 1 w srodku) - lepki ruch.
+        stretch = 4.0 * progress * (1.0 - progress)
+        knob_w = knob_d * (1.0 + 0.30 * stretch)
+        knob_h = knob_d * (1.0 - 0.16 * stretch)
+        travel = track_w - 6.0 - knob_d
+        center_x = track.left() + 3.0 + knob_d / 2.0 + travel * progress
+        center_y = track.center().y()
+        knob = QRectF(center_x - knob_w / 2.0, center_y - knob_h / 2.0, knob_w, knob_h)
         if checked:
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(qcolor("accent"))
         else:
+            # Knob "wylaczony": polton w drobnej siatce 2x2 (wczesniej 4x4 czytal
+            # sie jak szachownica) + cienki pierscien, zeby mial wyrazna krawedz.
             painter.setPen(pen("line_strong", 1.0))
-            painter.setBrush(dither_brush("text_mute", 0.5, 4, bg="surface2"))
+            painter.setBrush(dither_brush("text_mute", 0.5, 2, bg="surface3"))
         painter.drawEllipse(knob)
 
         if self.text():
@@ -150,10 +285,17 @@ class ChoiceGroup(QWidget):
         self._value = ""
         self._blob = 0.0
         self._target = 0.0
+        self._stretch = 0.0
         self._ready = False
         self._animation = QPropertyAnimation(self, b"blob", self)
         self._animation.setDuration(self.ANIM_MS)
-        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        # OutBack: pigulka lekko przelatuje cel i wraca - to ten "lepy" moment.
+        self._animation.setEasingCurve(QEasingCurve.Type.OutBack)
+        self._stretch_anim = QPropertyAnimation(self, b"stretch", self)
+        self._stretch_anim.setDuration(self.ANIM_MS)
+        self._stretch_anim.setKeyValueAt(0.0, 0.0)
+        self._stretch_anim.setKeyValueAt(0.45, 1.0)
+        self._stretch_anim.setKeyValueAt(1.0, 0.0)
         self.set_options(options or [])
 
     def set_options(self, options: list[tuple[str, str]]) -> None:
@@ -218,18 +360,24 @@ class ChoiceGroup(QWidget):
         if not self._ready:
             self._ready = True
             self._animation.stop()
+            self._stretch_anim.stop()
             self._blob = self._target
+            self._stretch = 0.0
             self.update()
             return
         if not animate or abs(self._target - self._blob) < 1.0:
             self._animation.stop()
+            self._stretch_anim.stop()
             self._blob = self._target
+            self._stretch = 0.0
             self.update()
             return
         self._animation.stop()
         self._animation.setStartValue(float(self._blob))
         self._animation.setEndValue(self._target)
         self._animation.start()
+        self._stretch_anim.stop()
+        self._stretch_anim.start()
 
     # ------------------------------------------------------- wlasciwosc animacji
     def _get_blob(self) -> float:
@@ -241,22 +389,35 @@ class ChoiceGroup(QWidget):
 
     blob = pyqtProperty(float, fget=_get_blob, fset=_set_blob)
 
+    def _get_stretch(self) -> float:
+        return float(self._stretch)
+
+    def _set_stretch(self, value: float) -> None:
+        self._stretch = clamp01(value)
+        self.update()
+
+    stretch = pyqtProperty(float, fget=_get_stretch, fset=_set_stretch)
+
     def resizeEvent(self, event) -> None:  # noqa: N802 (API Qt)
         super().resizeEvent(event)
         button = self._buttons.get(self._value)
         if button is None:
             return
         self._animation.stop()
+        self._stretch_anim.stop()
         self._target = float(button.geometry().center().x())
         self._blob = self._target
+        self._stretch = 0.0
         self.update()
 
     # -------------------------------------------------------------- malowanie
     def _pill_path(self, button: GhostButton) -> QPainterPath:
         geometry = button.geometry()
-        width = float(geometry.width())
-        height = float(geometry.height())
-        top = float(geometry.top())
+        # Podczas ruchu pigulka rozciaga sie w poziomie i splaszcza (lepki plyn),
+        # a po dojsciu wraca do rozmiaru przycisku.
+        width = float(geometry.width()) * (1.0 + 0.22 * self._stretch)
+        height = float(geometry.height()) * (1.0 - 0.18 * self._stretch)
+        top = float(geometry.top()) + (float(geometry.height()) - height) / 2.0
         radius = height / 2.0
         path = QPainterPath()
         path.addRoundedRect(QRectF(self._blob - width / 2.0, top, width, height), radius, radius)

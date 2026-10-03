@@ -34,7 +34,7 @@ from .controller import Controller
 from .helperclient import HelperBridge
 from .store import Store
 from .ui import sound, theme
-from .ui.widgets.paint import qcolor
+from .ui.widgets.paint import BAYER4, qcolor
 
 APP_ID = "cisza-gui"
 
@@ -134,17 +134,22 @@ class FallbackScreen(QWidget):
 
 
 class _Backdrop(QWidget):
-    """Tlo okna: czern + prawie przezroczysta siatka (bez kolorow).
+    """Tlo okna: czern + drobna faktura i prawie przezroczysta siatka.
 
     Ekrany sa przezroczyste (patrz `theme.qss()`), a karty maluja wlasne tlo,
-    wiec siatka widac tylko w odstepach - jest tlem, a nie tapeta pod tekstem.
+    wiec faktura i siatka widac tylko w odstepach - to tlo, a nie tapeta pod
+    tekstem. Faktura to kafelek 48x48 z wzorem Bayera (te same "piksele", co
+    w wykresach), rysowany raz i powielany `drawTiledPixmap`.
     """
 
     STEP = 32
+    TEXTURE = 48
 
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
         painter = QPainter(self)
-        painter.fillRect(self.rect(), qcolor("bg"))
+        rect = self.rect()
+        painter.fillRect(rect, qcolor("bg"))
+        painter.drawTiledPixmap(rect, _backdrop_texture(self.TEXTURE))
         step = self.STEP
         minor = qcolor("text", 9)
         major = qcolor("text", 16)
@@ -155,6 +160,29 @@ class _Backdrop(QWidget):
             painter.setPen(major if (y // step) % 4 == 0 else minor)
             painter.drawLine(0, y, self.width(), y)
         painter.end()
+
+
+_BACKDROP_TEXTURES: dict[int, QPixmap] = {}
+
+
+def _backdrop_texture(size: int = 48, threshold: int = 3, alpha: int = 10) -> QPixmap:
+    """Kafelek faktury: rozsypane piksele wg wzoru Bayera 4x4 (bez kolorow)."""
+    key = hash((int(size), int(threshold), int(alpha)))
+    cached = _BACKDROP_TEXTURES.get(key)
+    if cached is not None:
+        return cached
+    pixmap = QPixmap(int(size), int(size))
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(qcolor("text", int(alpha)))
+    for y in range(int(size)):
+        for x in range(int(size)):
+            if BAYER4[y % 4][x % 4] < int(threshold):
+                painter.drawPoint(x, y)
+    painter.end()
+    _BACKDROP_TEXTURES[key] = pixmap
+    return pixmap
 
 
 class MainWindow(QMainWindow):

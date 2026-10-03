@@ -1,9 +1,9 @@
 """Kafle statystyk i komunikaty typu toast."""
 from __future__ import annotations
 
-from PyQt6.QtCore import QRectF, Qt, QTimer
+from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRectF, Qt, QTimer
 from PyQt6.QtGui import QFont, QPainter
-from PyQt6.QtWidgets import QFrame, QWidget
+from PyQt6.QtWidgets import QFrame, QGraphicsOpacityEffect, QWidget
 
 from ..theme import FONT_SIZES, TYPO
 from . import labels
@@ -71,7 +71,7 @@ class StatTile(Card):
 
 
 class Toast(QFrame):
-    """Krotki komunikat na wierzchu widoku; znika po czasie."""
+    """Krotki komunikat na wierzchu widoku; pojawia sie i znika z animacja."""
 
     def __init__(self, parent: QWidget | None = None, margin: int = 24) -> None:
         super().__init__(parent)
@@ -79,9 +79,19 @@ class Toast(QFrame):
         self._margin = int(margin)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.timeout.connect(self.hide)
+        self._timer.timeout.connect(self._fade_out)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setFixedHeight(42)
+        self._fade = QGraphicsOpacityEffect(self)
+        self._fade.setOpacity(0.0)
+        self.setGraphicsEffect(self._fade)
+        self._fade_anim = QPropertyAnimation(self._fade, b"opacity", self)
+        self._fade_anim.setDuration(160)
+        self._fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._slide_anim = QPropertyAnimation(self, b"pos", self)
+        self._slide_anim.setDuration(160)
+        self._slide_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._target_pos = QPoint(self._margin, self._margin)
         self.hide()
 
     # ------------------------------------------------------------------ API
@@ -94,6 +104,7 @@ class Toast(QFrame):
         self._reposition()
         self.show()
         self.raise_()
+        self._animate_in()
         self._timer.start(max(400, int(ms)))
         self.update()
 
@@ -104,11 +115,48 @@ class Toast(QFrame):
     def message(self) -> str:
         return self._text
 
+    def _animate_in(self) -> None:
+        """Krotki wjazd z dolu + rozjasnienie (tanie: widget jest maly)."""
+        self._fade_anim.stop()
+        self._slide_anim.stop()
+        self._fade.setOpacity(0.0)
+        self._fade_anim.setStartValue(0.0)
+        self._fade_anim.setEndValue(1.0)
+        self._fade_anim.start()
+        self._slide_anim.setStartValue(QPoint(self._target_pos.x(), self._target_pos.y() + 8))
+        self._slide_anim.setEndValue(self._target_pos)
+        self._slide_anim.setDuration(180)
+        self._slide_anim.start()
+
+    def _fade_out(self) -> None:
+        self._fade_anim.stop()
+        self._fade_anim.setDuration(220)
+        self._fade_anim.setStartValue(float(self._fade.opacity()))
+        self._fade_anim.setEndValue(0.0)
+        try:
+            self._fade_anim.finished.disconnect()
+        except TypeError:
+            pass
+        self._fade_anim.finished.connect(self._finish_hide)
+        self._fade_anim.start()
+
+    def _finish_hide(self) -> None:
+        try:
+            self._fade_anim.finished.disconnect(self._finish_hide)
+        except TypeError:
+            pass
+        self._fade_anim.setDuration(160)
+        self.hide()
+
     def _reposition(self) -> None:
         parent = self.parentWidget()
         if parent is None:
             return
-        self.move(max(self._margin, parent.width() - self.width() - self._margin), self._margin)
+        self._target_pos = QPoint(
+            max(self._margin, parent.width() - self.width() - self._margin), self._margin
+        )
+        if not self.isVisible():
+            self.move(self._target_pos)
 
     def resizeEvent(self, event) -> None:  # noqa: N802 (API Qt)
         super().resizeEvent(event)

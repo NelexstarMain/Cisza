@@ -51,17 +51,20 @@ class StatsScreen(Screen):
         chart_card = Card("PRZEBIEG NAUKI", "MINUTY NAUKI W WYBRANYM OKRESIE")
         self._chart = MonochromeChart(kind="bar", height=200)
         chart_card.add(self._chart)
-        chart_card.body.addStretch(1)
+        # Wykres rosnie razem z karta (zamiast pustego marginesu pod spodem).
+        chart_card.body.setStretchFactor(self._chart, 1)
         top.addWidget(chart_card, 3)
 
         score_card = Card("FOCUS SCORE", "0–100")
         score_row = QHBoxLayout()
         score_row.setSpacing(16)
         self._score_ring = RingProgress(thickness=8)
-        self._score_ring.setFixedSize(124, 124)
+        # Minimum zamiast sztywnego rozmiaru: pierscien rosnie razem z karta,
+        # a czcionki i geometria skaluja sie same (charts-dev: dziala do 320 px).
+        self._score_ring.setMinimumSize(124, 124)
         self._score_ring.set_text("0")
         self._score_ring.set_caption("PUNKTY")
-        score_row.addWidget(self._score_ring, 0, Qt.AlignmentFlag.AlignTop)
+        score_row.addWidget(self._score_ring, 0)
         captions = QVBoxLayout()
         captions.setSpacing(6)
         captions.setContentsMargins(0, 8, 0, 0)
@@ -83,7 +86,8 @@ class StatsScreen(Screen):
         self._heatmap = Heatmap(cell=16)
         self._heatmap.set_legend(True)
         heat_card.add(self._heatmap)
-        heat_card.body.addStretch(1)
+        # Siatka heatmapy wypelnia karte na calej szerokosci i wysokosci.
+        heat_card.body.setStretchFactor(self._heatmap, 1)
         middle.addWidget(heat_card, 3)
 
         blocked_card = Card("TOP BLOKAD", "CO NAJCZĘŚCIEJ PRÓBOWAŁO WEJŚĆ")
@@ -108,7 +112,7 @@ class StatsScreen(Screen):
         processes_card = Card("TOP PROCESY", "CZAS AKTYWNOŚCI W MINUTACH")
         self._process_chart = MonochromeChart(kind="bar", height=150)
         processes_card.add(self._process_chart)
-        processes_card.body.addStretch(1)
+        processes_card.body.setStretchFactor(self._process_chart, 1)
         layout.addWidget(processes_card)
         layout.addStretch(1)
 
