@@ -304,9 +304,21 @@ class SettingsScreen(Screen):
         self._site_label = QLineEdit()
         self._site_label.setPlaceholderText("opis (opcjonalnie)")
         self._site_category = QComboBox()
-        for value, text in (("STUDY", "DOZWOLONA"), ("BLOCKED", "BLOKOWANA")):
+        self._site_category.setEditable(True)
+        self._site_category.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        for value, text in (
+            ("wlasne", "DOZWOLONA: WŁASNA"),
+            ("nauka", "DOZWOLONA: NAUKA"),
+            ("matura", "DOZWOLONA: MATURA"),
+            ("kod", "DOZWOLONA: PROGRAMOWANIE"),
+            ("narzedzia", "DOZWOLONA: NARZĘDZIA"),
+            ("wlasne_blok", "BLOKOWANA: WŁASNA"),
+            ("rozrywka", "BLOKOWANA: ROZRYWKA"),
+            ("spolecznosc", "BLOKOWANA: SOCIAL MEDIA"),
+            ("zakupy", "BLOKOWANA: ZAKUPY"),
+        ):
             self._site_category.addItem(text, value)
-        card.add_layout(self._field_row(self._site_host, self._site_label, self._site_category, stretch={0: 3, 1: 2}))
+        card.add_layout(self._field_row(self._site_host, self._site_label, self._site_category, stretch={0: 3, 1: 2, 2: 3}))
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         add = GhostButton("DODAJ / ZAPISZ")
@@ -478,6 +490,12 @@ class SettingsScreen(Screen):
             )
         if data.get("status"):
             self._status.setText(str(data["status"]))
+        is_admin = bool(data.get("is_admin"))
+        control_level = data.get("control_level", "PEŁNA (ADMIN)" if is_admin else "PODSTAWOWA")
+        helper_state = "POŁĄCZONY" if data.get("helper_online") else "ROZŁĄCZONY"
+        self._diag_info.setText(
+            f"KONTROLA SYSTEMU: {control_level}  ·  HELPER: {helper_state}"
+        )
 
     def _fill_apps(self, rows: list[dict]) -> None:
         self._apps_list.clear()
@@ -498,9 +516,13 @@ class SettingsScreen(Screen):
         self._sites_list.clear()
         for raw in as_list(rows):
             row = as_dict(raw)
-            category = "BLOK" if str(row.get("category", "")).upper() in ("BLOCK", "BLOCKED") else "NAUKA"
+            raw_cat = str(row.get("category", "")).strip()
+            cat_upper = raw_cat.upper()
+            is_blocked = cat_upper in ("BLOCK", "BLOCKED", "WLASNE_BLOK", "ROZRYWKA", "SPOLECZNOSC", "WIADOMOSCI", "ZAKUPY")
+            kind_tag = "BLOK" if is_blocked else "NAUKA"
             label = f"  ·  {row.get('label')}" if row.get("label") else ""
-            text = f"{row.get('host')}{label}  ·  {category}"
+            cat_disp = f"  [{raw_cat}]" if raw_cat and raw_cat not in ("STUDY", "BLOCKED") else ""
+            text = f"{row.get('host')}{label}  ·  {kind_tag}{cat_disp}"
             item = QListWidgetItem(text)
             item.setToolTip(text)
             item.setData(Qt.ItemDataRole.UserRole, row.get("id"))
@@ -545,12 +567,15 @@ class SettingsScreen(Screen):
         if not host:
             self.show_toast("Podaj host.")
             return
+        cat_data = self._site_category.currentData()
+        cat_text = self._site_category.currentText().strip()
+        category = cat_data if cat_data else cat_text
         self.request_action.emit(
             "save_site",
             {
                 "host": host,
                 "label": self._site_label.text().strip(),
-                "category": self._site_category.currentData(),
+                "category": category or "wlasne",
             },
         )
         self._site_host.clear()

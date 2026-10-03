@@ -26,6 +26,7 @@ class HelperBridge:
         self._log = logger or (lambda msg: None)
         self.token, self.authkey_hex = self._load_or_create_credentials()
         self.client: Optional[ipc.RpcClient] = None
+        self.helper_admin: bool = False
         self._events: list[dict] = []
         self.last_error: str = ""
 
@@ -66,12 +67,14 @@ class HelperBridge:
                 self.token,
                 on_event=self._handle_event,
             )
-            self.client.call("ping", timeout=timeout)
+            res = self.client.call("ping", timeout=timeout)
+            self.helper_admin = bool(isinstance(res, dict) and res.get("admin"))
             self._log("polaczono z helperem")
             return True
         except Exception as exc:  # noqa: BLE001
             self.last_error = str(exc)
             self.client = None
+            self.helper_admin = False
             return False
 
     def ensure(self, *, request_uac: bool = True, wait_seconds: float = 12.0) -> bool:

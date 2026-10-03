@@ -148,12 +148,6 @@ def verify_artifact(exe: Path, *, timeout: float = 300.0) -> tuple[bool, str]:
     env["CISZA_DATA_DIR"] = str(verify_dir)
     env["CISZA_DRY_RUN"] = "1"
     env["CISZA_SAFE"] = "1"
-    # Jednoplikowy .exe rozpakowuje sie do %TEMP% - wskazujemy wlasny katalog,
-    # zeby test nie zalezal od uprawnien systemowego %TEMP% (np. w sandboxie).
-    runtime_temp = verify_dir / "temp"
-    runtime_temp.mkdir(parents=True, exist_ok=True)
-    env["TEMP"] = str(runtime_temp)
-    env["TMP"] = str(runtime_temp)
     # .exe budujemy bez konsoli, wiec stdout bywa pusty - raport trybow CLI
     # trafia dodatkowo do pliku (patrz focuslock/__main__.py: emit_report).
     report_file = verify_dir / "raport.txt"

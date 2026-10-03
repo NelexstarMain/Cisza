@@ -22,10 +22,12 @@ CATEGORIES: dict[str, str] = {
     "kod": "Programowanie",
     "muzyka": "Muzyka i nuty",
     "narzedzia": "Narzędzia i notatki",
+    "wlasne": "Własne strony (dozwolone)",
     "rozrywka": "Rozrywka (blokowane)",
     "spolecznosc": "Social media (blokowane)",
     "wiadomosci": "Wiadomości i portale (blokowane)",
     "zakupy": "Zakupy (blokowane)",
+    "wlasne_blok": "Własne strony (blokowane)",
 }
 
 
@@ -294,7 +296,36 @@ def describe() -> dict:
 
 def catalog_payload(kind: Optional[str] = None) -> dict:
     """Gotowy do wyslania do UI zestaw: kategorie + strony."""
+    return catalog_payload_with_custom((), kind=kind)
+
+
+def catalog_payload_with_custom(custom_profiles: Sequence[dict], kind: Optional[str] = None) -> dict:
+    """Gotowy do wyslania do UI zestaw powiększony o własne profile stron z bazy."""
     groups = by_category(kind)
+    if custom_profiles:
+        custom_sites: list[CatalogSite] = []
+        for profile in custom_profiles:
+            host = normalize(str(profile.get("host") or ""))
+            if not host:
+                continue
+            name = str(profile.get("label") or host).strip()
+            raw_cat = str(profile.get("category") or "wlasne").strip()
+            is_blocked = raw_cat.upper() in (
+                "BLOCK", "BLOCKED", "WLASNE_BLOK", "ROZRYWKA", "SPOLECZNOSC", "WIADOMOSCI", "ZAKUPY"
+            )
+            site_kind = BLOCKED if is_blocked else STUDY
+            if kind and site_kind != kind:
+                continue
+            cat_key = "wlasne_blok" if is_blocked and raw_cat.upper() in ("BLOCK", "BLOCKED") else raw_cat.lower()
+            if cat_key not in CATEGORIES:
+                CATEGORIES[cat_key] = cat_key.capitalize()
+            custom_sites.append(CatalogSite(name=name, host=host, category=cat_key, kind=site_kind, note="własna"))
+
+        for site in custom_sites:
+            existing_hosts = {s.host for s in groups.get(site.category, [])}
+            if site.host not in existing_hosts:
+                groups.setdefault(site.category, []).append(site)
+
     return {
         "ok": True,
         "categories": [
@@ -308,6 +339,7 @@ def catalog_payload(kind: Optional[str] = None) -> dict:
         "defaults": {"study": default_study_hosts(), "blocked": default_block_hosts()},
         "summary": describe(),
     }
+
 
 
 def hosts_from_names(names: Sequence[str]) -> list[str]:

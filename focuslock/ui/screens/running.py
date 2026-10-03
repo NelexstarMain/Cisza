@@ -126,7 +126,9 @@ class RunningScreen(Screen):
         self._ring.set_value(progress)
 
         tag = str(state.get("tag") or self.data("tag") or "")
-        self._tag.set_full_text(f"TAG: {tag.upper()}" if tag else "BEZ TAGU")
+        control = "PEŁNA (ADMIN)" if (data.get("is_admin") or state.get("is_admin")) else "PODSTAWOWA"
+        tag_str = f"TAG: {tag.upper()}" if tag else "BEZ TAGU"
+        self._tag.set_full_text(f"{tag_str} · KONTROLA: {control}")
         goal = str(state.get("goal_note") or self.data("goal_note") or "").strip()
         self._goal.setText(goal or "Bez zapisanego celu — dopisz go w kreatorze sesji.")
 

@@ -44,8 +44,9 @@ def monochrome_icon(size: int = 32, running: bool = False, paused: bool = False)
 
 
 class Tray(QSystemTrayIcon):
-    """Menu w zasobniku: Start / Zakończ / Statystyki / Zamknij."""
+    """Menu w zasobniku: Pokaż / Start / Zakończ / Statystyki / Zamknij."""
 
+    show_requested = pyqtSignal()
     start_requested = pyqtSignal()
     end_requested = pyqtSignal()
     stats_requested = pyqtSignal()
@@ -59,11 +60,13 @@ class Tray(QSystemTrayIcon):
         self.setToolTip(self._title)
 
         self._menu = QMenu()
+        self._action_show = self._menu.addAction("Pokaż Ciszę")
         self._action_start = self._menu.addAction("Start sesji")
         self._action_end = self._menu.addAction("Zakończ sesję")
         self._action_stats = self._menu.addAction("Statystyki")
         self._menu.addSeparator()
         self._action_quit = self._menu.addAction("Zamknij")
+        self._action_show.triggered.connect(lambda _checked=False: self.show_requested.emit())
         self._action_start.triggered.connect(lambda _checked=False: self.start_requested.emit())
         self._action_end.triggered.connect(lambda _checked=False: self.end_requested.emit())
         self._action_stats.triggered.connect(lambda _checked=False: self.stats_requested.emit())
@@ -75,6 +78,7 @@ class Tray(QSystemTrayIcon):
     # ------------------------------------------------------------------ API
     def actions(self) -> dict[str, object]:
         return {
+            "show": self._action_show,
             "start": self._action_start,
             "end": self._action_end,
             "stats": self._action_stats,
@@ -104,4 +108,5 @@ class Tray(QSystemTrayIcon):
             QSystemTrayIcon.ActivationReason.Trigger,
             QSystemTrayIcon.ActivationReason.DoubleClick,
         ):
-            self.stats_requested.emit()
+            self.show_requested.emit()
+

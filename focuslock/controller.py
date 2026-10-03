@@ -879,7 +879,11 @@ class Controller:
                 if kind not in (sitecatalog.STUDY, sitecatalog.BLOCKED):
                     kind = sitecatalog.STUDY
                 query = str(payload.get("query", "") or "").strip()
-                payload_out = sitecatalog.catalog_payload(kind)
+                try:
+                    custom = self.store.list_site_profiles()
+                except Exception:
+                    custom = []
+                payload_out = sitecatalog.catalog_payload_with_custom(custom, kind)
                 if query:
                     needle = query.lower()
                     filtered = []
@@ -1206,16 +1210,35 @@ class Controller:
         if not host:
             return {"ok": False, "errors": ["podaj host"]}
         label = str(payload.get("label") or "").strip()
-        raw_cat = str(payload.get("category") or "STUDY").upper()
-        category = "BLOCKED" if raw_cat in ("BLOCK", "BLOCKED") else "STUDY"
+        raw_cat = str(payload.get("category") or "wlasne").strip()
+        raw_kind = str(payload.get("kind") or "").upper()
+        if not raw_kind:
+            raw_kind = (
+                "BLOCKED"
+                if raw_cat.upper() in ("BLOCK", "BLOCKED", "WLASNE_BLOK", "ROZRYWKA", "SPOLECZNOSC", "WIADOMOSCI", "ZAKUPY")
+                else "STUDY"
+            )
+        if raw_cat.upper() in ("BLOCK", "BLOCKED"):
+            category = "BLOCKED"
+        elif raw_cat.upper() in ("STUDY", ""):
+            category = "STUDY"
+        else:
+            category = raw_cat
         if not label:
             found = sitecatalog.find(host)
             label = found.name if found else host
         profile_id = self.store.upsert_site_profile(host, label, category)
-        if category == "BLOCKED":
+        if raw_kind == "BLOCKED" or category == "BLOCKED":
             self.settings.network.blocklist = list(dict.fromkeys(list(self.settings.network.blocklist) + [host]))
             self.settings.save(self.store)
         return {"ok": True, "id": profile_id, "host": host, "label": label, "category": category}
+
+    def is_elevated(self) -> bool:
+        """Zwraca True, gdy GUI lub helper posiada uprawnienia administratora."""
+        if self._is_admin():
+            return True
+        return bool(self.bridge.online and getattr(self.bridge, "helper_admin", False))
+
 
     # ------------------------------------------------------------- diagnostyka
     def diagnostics(self) -> dict:
@@ -1494,6 +1517,8 @@ class Controller:
             "blocked": top_blocked,
             "state": engine_state,
             "helper_online": self.bridge.online,
+            "is_admin": self.is_elevated(),
+            "control_level": "PEŁNA (ADMIN)" if self.is_elevated() else "PODSTAWOWA",
             "guard": self.last_guard_stats,
             "settings": self.settings.to_dict(),
         }

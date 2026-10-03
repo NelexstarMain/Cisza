@@ -162,17 +162,17 @@ def test_every_tray_action_has_a_triggered_handler():
     """Kazda pozycja menu tray ma `.triggered.connect(...)`."""
     text = _read(TRAY_PY)
     actions = TRAY_ACTION_RE.findall(text)
-    assert len(actions) == 4, actions
+    assert len(actions) == 5, actions
     orphan = [label for var, _quote, label in actions if f"{var}.triggered.connect(" not in text]
     assert orphan == [], f"pozycje tray bez odbiorcy: {orphan}"
 
 
 def test_tray_signals_are_connected_in_app():
-    """Cztery sygnaly `Tray` maja odbiorce w `run()` z `app.py`."""
+    """Sygnaly `Tray` maja odbiorce w `run()` z `app.py`."""
     app_source = _read(APP_PY)
     missing = [
         name
-        for name in ("start_requested", "end_requested", "stats_requested", "quit_requested")
+        for name in ("show_requested", "start_requested", "end_requested", "stats_requested", "quit_requested")
         if f"tray.{name}.connect(" not in app_source
     ]
     assert missing == [], f"sygnaly tray bez odbiorcy w app.py: {missing}"

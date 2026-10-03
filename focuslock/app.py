@@ -33,7 +33,7 @@ from .config import Settings
 from .controller import Controller
 from .helperclient import HelperBridge
 from .store import Store
-from .ui import theme
+from .ui import sound, theme
 
 APP_ID = "cisza-gui"
 
@@ -580,6 +580,22 @@ class MainWindow(QMainWindow):
         except Exception:  # noqa: BLE001
             pass
 
+    def restore_from_tray(self) -> None:
+        """Przywraca okno z zasobnika i aktywuje odpowiedni ekran."""
+        self._ensure_window_visible()
+        engine = self.controller.engine
+        state = engine.state() if engine is not None else {}
+        phase = str(state.get("phase") or "").upper()
+        if phase in ("STUDY", "PAUSED"):
+            self.show_screen("running")
+        elif phase in ("BREAK", "LONG_BREAK"):
+            self.show_screen("break")
+        elif state.get("mode") == "FREE" and phase not in ("IDLE", "DONE", ""):
+            self.show_screen("free")
+        else:
+            self.show_screen("home")
+
+
     def _go_kiosk(self) -> None:
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
@@ -624,8 +640,16 @@ class MainWindow(QMainWindow):
             phase = str((data or {}).get("phase") or "").upper()
             if phase in ("BREAK", "LONG_BREAK"):
                 self.show_screen("break")
+                if self.settings.ui.sound_enabled and not self.settings.lock.mute_sound:
+                    sound.play_sound("break_start")
             elif phase == "STUDY":
                 self.show_screen("running")
+                if self.settings.ui.sound_enabled and not self.settings.lock.mute_sound:
+                    sound.play_sound("study_start")
+        elif event == "pomodoro_end":
+            if bool(data.get("completed", False)):
+                if self.settings.ui.sound_enabled and not self.settings.lock.mute_sound:
+                    sound.play_sound("pomodoro_end")
         elif event == "session_finished":
             self.leave_kiosk()
             self.show_screen("summary", self._summary_payload(data))
@@ -871,6 +895,7 @@ def run(argv: Optional[list[str]] = None) -> int:
         try:
             tray_module = importlib.import_module("focuslock.ui.tray")
             tray = tray_module.Tray(window, "Cisza", controller, app)
+            tray.show_requested.connect(window.restore_from_tray)
             tray.start_requested.connect(lambda: window._start_study({}))
             tray.end_requested.connect(lambda: window._request_end("user"))
             tray.stats_requested.connect(lambda: window.show_screen("stats"))

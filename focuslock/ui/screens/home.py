@@ -122,13 +122,14 @@ class HomeScreen(Screen):
 
         phase = str(state.get("phase") or "IDLE").upper()
         running = phase not in ("IDLE", "DONE")
+        control = "KONTROLA: PEŁNA (ADMIN)" if data.get("is_admin") else "KONTROLA: PODSTAWOWA"
         if running and state.get("remaining") is not None:
             self._timer.setText(charts.fmt_clock(state.get("remaining") or 0))
-            self._status.setText(PHASE_LABELS.get(phase, phase))
+            self._status.setText(f"{PHASE_LABELS.get(phase, phase)} · {control}")
         else:
             study_minutes = as_int(self._plan.get("study_minutes"), 25)
             self._timer.setText(charts.fmt_clock(study_minutes * 60))
-            self._status.setText("GOTOWY DO NAUKI")
+            self._status.setText(f"GOTOWY DO NAUKI · {control}")
 
         tag = str(self._plan.get("tag") or "")
         self._tag.set_full_text(f"TAG: {tag.upper()}" if tag else "BEZ TAGU")
