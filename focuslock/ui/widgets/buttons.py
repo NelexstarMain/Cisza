@@ -19,8 +19,34 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QBrush, QLinearGradient, QPainter, QPainterPath, QRadialGradient
 from PyQt6.QtWidgets import QAbstractButton, QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
-from ..theme import FONT_SIZES, SIZES, TYPO
+from ..theme import FONT_SIZES, RADIUS, SIZES, TYPO
+from . import texture
 from .paint import clamp01, dither_brush, gray_level, pen, qcolor, ui_font
+
+#: Ziarno powierzchni kontrolek (ten sam material, co karty i tlo).
+BUTTON_GRAIN: tuple[str, ...] = ("pepper", "sand")
+
+
+def _paint_button_grain(
+    painter: QPainter,
+    widget: QWidget,
+    *,
+    tint: str = "bg",
+    opacity: float = 0.35,
+    radius: float = 0.0,
+) -> None:
+    """Ziarno wewnatrz konturki widgetu (przyciete do zaokraglenia)."""
+    rect = QRectF(widget.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+    if rect.width() < 4.0 or rect.height() < 4.0:
+        return
+    texture.paint_surface(
+        painter,
+        rect,
+        radius=float(radius) if radius > 0.0 else max(0.0, float(RADIUS["md"]) - 1.0),
+        names=BUTTON_GRAIN,
+        opacity=opacity,
+        tint=tint,
+    )
 
 
 class _BloomMixin:
@@ -102,6 +128,9 @@ class PrimaryButton(_BloomMixin, QPushButton):
         # krycie jest tak niskie, ze napis pozostaje czytelny.
         super().paintEvent(event)
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        # Jasne tlo dostaje ciemne ziarno - jak swiatlo na papierze, nie szum.
+        _paint_button_grain(painter, self, tint="bg", opacity=0.35)
         self._paint_bloom(painter, dark=True)
         painter.end()
 
@@ -233,6 +262,14 @@ class Toggle(QAbstractButton):
         # Tor tez "plynie": im blizej konca, tym jasniejszy.
         painter.setBrush(gray_level(0.25 + 0.35 * progress, "surface2", "surface3"))
         painter.drawRoundedRect(track, radius, radius)
+        # Tor jest materialem tej samej rodziny co tlo (drobne ziarno).
+        texture.paint_surface(
+            painter,
+            track.adjusted(1.0, 1.0, -1.0, -1.0),
+            radius=max(0.0, radius - 1.0),
+            names=texture.SOFT_STACK,
+            opacity=0.75,
+        )
 
         knob_d = track_h - 6.0
         # Rozciagniecie w polowie drogi (0 na koncach, 1 w srodku) - lepki ruch.
@@ -449,10 +486,13 @@ class ChoiceGroup(QWidget):
         gradient = QLinearGradient(QPointF(0.0, top), QPointF(0.0, top + height))
         gradient.setColorAt(0.0, qcolor("surface3"))
         gradient.setColorAt(1.0, qcolor("surface2"))
+        path = self._pill_path(button)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(gradient))
-        painter.drawPath(self._pill_path(button))
+        painter.drawPath(path)
+        # Pigulka to ta sama "substancja" co pasek boczny - drobne ziarno pod obramowaniem.
+        texture.paint_grain(painter, path.boundingRect(), "sand", phase=4, opacity=0.75, clip=path)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(pen("line_strong"))
-        painter.drawPath(self._pill_path(button))
+        painter.drawPath(path)
         painter.end()

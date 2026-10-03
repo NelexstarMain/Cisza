@@ -1,10 +1,12 @@
 """Podstawowe elementy: linia wlosowa, karta i pusty stan."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QRectF, Qt
+from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import QFrame, QLayout, QSizePolicy, QVBoxLayout, QWidget
 
-from . import labels
+from ..theme import RADIUS
+from . import labels, texture
 
 #: Wspolne marginesy wnetrza kart - wszystkie ekrany uzywaja tego samego rytmu.
 CARD_MARGINS = (18, 16, 18, 16)
@@ -26,7 +28,19 @@ def hr() -> Hairline:
 
 
 class Card(QFrame):
-    """Karta z opcjonalnym naglowkiem; zawartosc dodawana przez `add`/`add_layout`."""
+    """Karta z opcjonalnym naglowkiem; zawartosc dodawana przez `add`/`add_layout`.
+
+    Karta ma wlasna, delikatna fakture (`widgets.texture`): trzy poziomy ziarna,
+    a w stanie `active` gestrzejszy stos (ten sam material, wyzszy poziom).
+    Ziarno jest przyciete do zaokraglenia karty i rysowane pod trescia, wiec
+    tekst pozostaje ostry.
+    """
+
+    #: Poziomy ziarna karty (od drobnego do najdrobniejszego).
+    TEXTURE_LEVELS: tuple[str, ...] = texture.SURFACE_STACK
+    #: Krycie ziarna w stanie spoczynku / aktywnym.
+    TEXTURE_OPACITY = 0.65
+    TEXTURE_OPACITY_ACTIVE = 1.0
 
     def __init__(
         self,
@@ -56,6 +70,32 @@ class Card(QFrame):
         self.body.setContentsMargins(0, 0, 0, 0)
         self.body.setSpacing(8)
         shell.addLayout(self.body)
+
+    # ------------------------------------------------------------------ faktura
+    def is_active_card(self) -> bool:
+        return str(self.property("state") or "") == "active"
+
+    def texture_opacity(self) -> float:
+        return self.TEXTURE_OPACITY_ACTIVE if self.is_active_card() else self.TEXTURE_OPACITY
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        # Tlo i obramowanie rysuje QSS (`super()`), faktura leci na wierzch tla,
+        # ale pod dziecmi - dlatego tekst karty zostaje czysty.
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        if rect.width() < 4.0 or rect.height() < 4.0:
+            painter.end()
+            return
+        texture.paint_surface(
+            painter,
+            rect,
+            radius=max(0.0, float(RADIUS["lg"]) - 1.0),
+            names=self.TEXTURE_LEVELS,
+            opacity=self.texture_opacity(),
+        )
+        painter.end()
 
     # ------------------------------------------------------------------ API
     def add(self, widget: QWidget) -> QWidget:
@@ -126,6 +166,25 @@ class EmptyState(QFrame):
         layout.addStretch(1)
         self._detail.setVisible(bool(detail))
         self.setMinimumHeight(96)
+
+    # ------------------------------------------------------------------ faktura
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Pusty stan to tez material: ziarno z grudkami w ramce."""
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        if rect.width() < 4.0 or rect.height() < 4.0:
+            painter.end()
+            return
+        texture.paint_surface(
+            painter,
+            rect,
+            radius=max(0.0, float(RADIUS["md"]) - 1.0),
+            names=("medium", "sand", "clump"),
+            opacity=0.6,
+        )
+        painter.end()
 
     # ------------------------------------------------------------------ API
     def text(self) -> str:

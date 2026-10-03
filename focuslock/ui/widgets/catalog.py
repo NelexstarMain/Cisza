@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import FONT_SIZES, SIZES, TYPO
-from . import labels
+from . import labels, texture
 from .buttons import GhostButton
 from .paint import pen, qcolor, ui_font
 
@@ -199,6 +199,15 @@ class AppTile(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(qcolor(background))
         painter.drawRoundedRect(rect, radius, radius)
+        # Kafel jest materialem: ziarno (z grudkami) pod ramka i nazwa - bez
+        # Bayera na calym polu, bo ten zaslanial ikone i tekst.
+        texture.paint_surface(
+            painter,
+            rect.adjusted(1.0, 1.0, -1.0, -1.0),
+            radius=max(0.0, radius - 1.0),
+            names=("fine", "sand", "clump"),
+            opacity=0.65,
+        )
 
         if self._selected:
             # Zaznaczenie: cienka ramka + maly znacznik w rogu. Wzór Bayera na

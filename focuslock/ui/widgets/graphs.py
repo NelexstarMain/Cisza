@@ -14,6 +14,7 @@ from PyQt6.QtGui import QFontMetrics, QPainter, QPainterPath
 from PyQt6.QtWidgets import QSizePolicy, QWidget
 
 from ..theme import FONT_SIZES, TYPO, c
+from . import texture
 from .paint import clamp01, dither_brush, fill_dither, gray_level, pen, qcolor, ui_font
 
 #: Minimalna wysokosc, przy ktorej wykres jest jeszcze czytelny (podpisy osi
@@ -204,11 +205,18 @@ class MonochromeChart(QWidget):
         return [rect for _, rect in self._label_layout()]
 
     # -------------------------------------------------------------- malowanie
+    def _paint_plot_texture(self, painter: QPainter, plot: QRectF) -> None:
+        """Tlo pola wykresu: dwa poziomy ziarna (bez linii pomocniczych)."""
+        if plot.width() < 8.0 or plot.height() < 8.0:
+            return
+        texture.paint_stack(painter, plot, ("medium", "sand", "clump"), opacity=0.5)
+
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
         painter = QPainter(self)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setFont(self._label_font())
         plot = self.plot_rect()
+        self._paint_plot_texture(painter, plot)
 
         painter.setPen(pen("line"))
         painter.drawLine(int(plot.left()), int(plot.bottom()), int(plot.right()), int(plot.bottom()))
@@ -574,6 +582,10 @@ class Heatmap(QWidget):
 
         cell = self.cell_size()
         plot = self.plot_rect()
+        # Miedzy komorkami zostaje 1 px przerwy - zamiast plaskiej plamy lezy tam
+        # ziarno (z grudkami), wiec siatka heatmapy czyta sie jak material.
+        if plot.width() >= 8.0 and plot.height() >= 8.0:
+            texture.paint_stack(painter, plot, ("medium", "sand", "clump"), opacity=0.5)
         for row_index, row in enumerate(self._matrix):
             for col_index in range(cols):
                 value = row[col_index] if col_index < len(row) else 0.0

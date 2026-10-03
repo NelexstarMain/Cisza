@@ -128,7 +128,7 @@ QWidget {{
 }}
 QMainWindow, QDialog {{ background-color: {c('bg')}; }}
 
-/* Ekrany sa przezroczyste: siatke w tle rysuje widget okna (`app._Backdrop`),
+/* Ekrany sa przezroczyste: ziarno tla rysuje widget okna (`app._Backdrop`),
    a karty/pola maluja sie na wlasnym, nieprzezroczystym tle. */
 QStackedWidget {{ background: transparent; border: none; }}
 QStackedWidget > QWidget {{ background: transparent; }}

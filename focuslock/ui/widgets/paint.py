@@ -11,12 +11,27 @@ from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen, QPi
 
 from ..theme import TYPO, c
 
-BAYER4: tuple[tuple[int, ...], ...] = (
-    (0, 8, 2, 10),
-    (12, 4, 14, 6),
-    (3, 11, 1, 9),
-    (15, 7, 13, 5),
-)
+def _bayer(order: int) -> tuple[tuple[int, ...], ...]:
+    """Macierz Bayera ``order x order`` (rekurencja, wartosci 0..order^2-1).
+
+    Uzywana przez dithering wypelnien (``dither_brush``) - tam chodzi o uporzad-
+    kowany wzor o rownomiernym rozlozeniu, a nie o ziarno.
+    """
+    size = 1
+    matrix: list[list[int]] = [[0]]
+    offsets = ((0, 2), (3, 1))
+    while size < int(order):
+        step = size * 2
+        grown = [[0] * step for _ in range(step)]
+        for y in range(step):
+            for x in range(step):
+                grown[y][x] = 4 * matrix[y % size][x % size] + offsets[y // size][x // size]
+        matrix = [list(row) for row in grown]
+        size = step
+    return tuple(tuple(row) for row in matrix)
+
+
+BAYER4: tuple[tuple[int, ...], ...] = _bayer(4)
 
 _BRUSH_CACHE: dict[tuple, QBrush] = {}
 

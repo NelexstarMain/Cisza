@@ -1,12 +1,12 @@
 """Modalny dialog PIN: bez ramki systemowej, tylko szarosci."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QFont, QPainter
 from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
 
 from ..theme import FONT_SIZES, TYPO
-from ..widgets import Card, GhostButton, PrimaryButton, labels
+from ..widgets import Card, GhostButton, PrimaryButton, labels, texture
 from ..widgets.paint import mono_font
 
 
@@ -62,6 +62,12 @@ class PinDialog(QDialog):
         shell.addWidget(card)
 
     # ------------------------------------------------------------------ API
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Tlo okna PIN: faktura jak w tle okna (karta na niej dostaje wlasna)."""
+        painter = QPainter(self)
+        texture.paint_dialog_background(painter, QRectF(self.rect()), opacity=0.7)
+        painter.end()
+
     def set_prompt(self, text: str) -> None:
         self._prompt.setText(text)
 

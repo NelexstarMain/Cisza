@@ -14,7 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -26,7 +27,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ..theme import SIZES
-from . import labels
+from . import labels, texture
 from .buttons import GhostButton, PrimaryButton
 
 #: Rola danych wpisu (dict) na wierszu listy.
@@ -130,6 +131,12 @@ class CatalogPicker(QDialog):
         self.refresh()
 
     # ------------------------------------------------------------------ API
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Tlo okna modalnego: ta sama faktura co tlo glownego okna."""
+        painter = QPainter(self)
+        texture.paint_dialog_background(painter, QRectF(self.rect()))
+        painter.end()
+
     def set_entries(self, entries: Any) -> None:
         """Podmienia caly zbior pozycji (grupy + wpisy)."""
         self._entries = [dict(entry) for entry in (entries or []) if isinstance(entry, dict)]

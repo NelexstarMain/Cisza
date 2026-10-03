@@ -48,6 +48,7 @@ from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from .buttons import GhostButton
 from .paint import pen, qcolor
+from . import texture
 
 
 class NavRail(QWidget):
@@ -570,6 +571,27 @@ class NavRail(QWidget):
         painter.setBrush(qcolor("line"))
         painter.drawRoundedRect(QRectF(self.WALL_X, top, self.WALL_W, height), 1.0, 1.0)
 
+    def _paint_rail_texture(self, painter: QPainter) -> None:
+        """Materiał paska: gestrzy stos ziarna + sciana z drobniejszym ziarnem.
+
+        Pasek lezy na tle okna, wiec dodatkowe ziarno robi z niego odrebny
+        "panel" (te same poziomy co tlo, ale zagęszczone), a przy scianie
+        ziarno przechodzi plynnie w drobniejsze - bez widocznego progu.
+        """
+        rect = QRectF(self.rect())
+        if rect.width() < 8.0 or rect.height() < 8.0:
+            return
+        texture.paint_stack(painter, rect, ("medium", "fine", "sand", "clump"), opacity=0.55)
+        brush_width = min(20.0, max(8.0, rect.width() * 0.2))
+        texture.paint_grain_fade(
+            painter,
+            QRectF(rect.left(), rect.top(), brush_width, rect.height()),
+            "fine",
+            fade="right",
+            span=1.0,
+            opacity=0.6,
+        )
+
     def _paint_hover(self, painter: QPainter, height: float) -> None:
         """Przygaszona plama pod kursorem - rysowana POD pigulka, wiec tekst czyta sie dalej."""
         progress = min(1.0, max(0.0, float(self._hover)))
@@ -594,6 +616,7 @@ class NavRail(QWidget):
         right = float(geometry.left() + max(24, geometry.width()))
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self._paint_rail_texture(painter)
         self._paint_wall(painter)
         self._paint_hover(painter, base_height)
         path = self._substance_path(right, height)
@@ -601,6 +624,9 @@ class NavRail(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(self._pill_gradient(bounds.top(), bounds.bottom())))
         painter.drawPath(path)
+        # Pigulka jest z tego samego materialu co pasek - drobne ziarno pod jej
+        # obramowaniem, wiec nie wyglada jak plastikowy prostokat na tle.
+        texture.paint_grain(painter, bounds, "sand", phase=3, opacity=0.75, clip=path)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(pen("line_strong"))
         painter.drawPath(path)

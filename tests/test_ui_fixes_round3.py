@@ -163,19 +163,28 @@ def test_qss_stays_monochrome():
 
 
 # --------------------------------------------------------------------- 4. wyglad
-def test_backdrop_draws_faint_grid():
+def test_backdrop_is_grain_not_grid():
+    """Tlo okna to samo ziarno - bez linii i bez rytmu siatki."""
     qt = pytest.importorskip("PyQt6.QtWidgets")
     app_module = pytest.importorskip("focuslock.app")
 
     app = qt.QApplication.instance() or qt.QApplication([])
     backdrop = app_module._Backdrop()
-    backdrop.resize(200, 120)
+    backdrop.resize(320, 200)
     image = backdrop.grab().toImage()
     assert not image.isNull()
-    on_line = image.pixelColor(32, 40)
-    off_line = image.pixelColor(33, 40)
-    assert on_line.red() >= off_line.red(), "siatka nie jest rysowana"
-    assert on_line.red() <= 48, f"siatka jest za mocna: {on_line.red()}"
+
+    # ziarno jest: kilka poziomow jasnosci, ale wszystko ciemne (max 64)
+    values = [image.pixelColor(x, y).red() for y in range(0, 200) for x in range(0, 320)]
+    levels = len(set(values))
+    assert levels >= 8, f"ziarno ma zbyt malo poziomow: {levels}"
+    assert max(values) <= 64, f"ziarno jest za mocne: {max(values)}"
+
+    # siatki nie ma: zadna kolumna ani wiersz nie odcina sie rytmicznie
+    columns = [sum(image.pixelColor(x, y).red() for y in range(200)) / 200.0 for x in range(320)]
+    rows = [sum(image.pixelColor(x, y).red() for x in range(320)) / 320.0 for y in range(200)]
+    assert max(columns) - min(columns) < 8.0, "w tle widac pionowe linie (siatka)"
+    assert max(rows) - min(rows) < 8.0, "w tle widac poziome linie (siatka)"
     _ = app
 
 

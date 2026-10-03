@@ -10,8 +10,8 @@ import os
 import sys
 from typing import Optional
 
-from PyQt6.QtCore import QObject, QRunnable, QThreadPool, QTimer, Qt, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon, QKeySequence, QPixmap, QPainter, QColor, QShortcut
+from PyQt6.QtCore import QObject, QRunnable, QRectF, QThreadPool, QTimer, Qt, pyqtSignal
+from PyQt6.QtGui import QAction, QColor, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (
     QApplication,
@@ -34,7 +34,8 @@ from .controller import Controller
 from .helperclient import HelperBridge
 from .store import Store
 from .ui import sound, theme
-from .ui.widgets.paint import BAYER4, qcolor
+from .ui.widgets import texture
+from .ui.widgets.paint import qcolor
 
 APP_ID = "cisza-gui"
 
@@ -134,55 +135,41 @@ class FallbackScreen(QWidget):
 
 
 class _Backdrop(QWidget):
-    """Tlo okna: czern + drobna faktura i prawie przezroczysta siatka.
+    """Tlo okna: czern + stos ziarna o roznych poziomach i rodzajach.
 
     Ekrany sa przezroczyste (patrz `theme.qss()`), a karty maluja wlasne tlo,
-    wiec faktura i siatka widac tylko w odstepach - to tlo, a nie tapeta pod
-    tekstem. Faktura to kafelek 48x48 z wzorem Bayera (te same "piksele", co
-    w wykresach), rysowany raz i powielany `drawTiledPixmap`.
+    wiec ziarno widac tylko w odstepach - to tlo, a nie tapeta pod tekstem.
+    Tlo to **tylko ziarno** - zadnych linii ani siatki.
+
+    Warstwy (patrz `widgets.texture.GRAINS`):
+
+    1. ``coarse``/``medium``/``fine``/``sand`` - cztery poziomy zwyklego ziarna,
+       od gestej kaszki po ledwo widoczny piasek (kazdy z inna faza kafelka,
+       wiec wzor sie nie powtarza),
+    2. ``clump``/``clump_coarse``/``clump_rare`` - ziarno zlepione w grudki
+       2x2, 3x3 i 4x4 (inny charakter niz pojedyncze piksele),
+    3. ``dust`` - rzadkie, jasne pylki nad calym tlem.
+
+    Wszystko rysujemy z cache'owanych kafelkow, wiec liczba poziomow nie
+    podnosi kosztu przerysowania.
     """
 
-    STEP = 32
-    TEXTURE = 48
+    #: Poziomy ziarna tla (test regresyjny pilnuje, ze jest ich wiecej niz dwa).
+    TEXTURE_LEVELS: tuple[str, ...] = texture.BACKDROP_STACK
 
     def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
         painter = QPainter(self)
-        rect = self.rect()
-        painter.fillRect(rect, qcolor("bg"))
-        painter.drawTiledPixmap(rect, _backdrop_texture(self.TEXTURE))
-        step = self.STEP
-        minor = qcolor("text", 9)
-        major = qcolor("text", 16)
-        for x in range(0, self.width(), step):
-            painter.setPen(major if (x // step) % 4 == 0 else minor)
-            painter.drawLine(x, 0, x, self.height())
-        for y in range(0, self.height(), step):
-            painter.setPen(major if (y // step) % 4 == 0 else minor)
-            painter.drawLine(0, y, self.width(), y)
+        rect = QRectF(self.rect())
+        painter.fillRect(self.rect(), qcolor("bg"))
+        if rect.width() < 8.0 or rect.height() < 8.0:
+            painter.end()
+            return
+        # 1. ziarno: cztery poziomy + trzy rodzaje grudek (kazde z inna faza,
+        #    zbiorczo przygaszone, zeby tlo zostalo czarne, a nie szare)
+        texture.paint_stack(painter, rect, self.TEXTURE_LEVELS, opacity=0.7)
+        # 2. pylki: rzadkie, jasne punkty ponad ziarnem
+        texture.paint_grain(painter, rect, "dust", phase=5, opacity=0.9)
         painter.end()
-
-
-_BACKDROP_TEXTURES: dict[int, QPixmap] = {}
-
-
-def _backdrop_texture(size: int = 48, threshold: int = 3, alpha: int = 10) -> QPixmap:
-    """Kafelek faktury: rozsypane piksele wg wzoru Bayera 4x4 (bez kolorow)."""
-    key = hash((int(size), int(threshold), int(alpha)))
-    cached = _BACKDROP_TEXTURES.get(key)
-    if cached is not None:
-        return cached
-    pixmap = QPixmap(int(size), int(size))
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(qcolor("text", int(alpha)))
-    for y in range(int(size)):
-        for x in range(int(size)):
-            if BAYER4[y % 4][x % 4] < int(threshold):
-                painter.drawPoint(x, y)
-    painter.end()
-    _BACKDROP_TEXTURES[key] = pixmap
-    return pixmap
 
 
 class MainWindow(QMainWindow):

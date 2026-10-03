@@ -5,8 +5,8 @@ from PyQt6.QtCore import QEasingCurve, QPoint, QPropertyAnimation, QRectF, Qt, Q
 from PyQt6.QtGui import QFont, QPainter
 from PyQt6.QtWidgets import QFrame, QGraphicsOpacityEffect, QWidget
 
-from ..theme import FONT_SIZES, TYPO
-from . import labels
+from ..theme import FONT_SIZES, RADIUS, TYPO
+from . import labels, texture
 from .indicators import DitheredBar, Sparkline
 from .paint import pen, qcolor, ui_font
 from .primitives import Card
@@ -169,6 +169,14 @@ class Toast(QFrame):
         painter.setBrush(qcolor("surface3"))
         painter.setPen(pen("text_mute", 1.0, Qt.PenStyle.DashLine))
         painter.drawRoundedRect(rect, 8.0, 8.0)
+        # Komunikat tez jest "materialem": ziarno z grudkami w tej samej kapsule.
+        texture.paint_surface(
+            painter,
+            rect.adjusted(1.0, 1.0, -1.0, -1.0),
+            radius=7.0,
+            names=("fine", "sand", "clump"),
+            opacity=0.95,
+        )
         painter.setFont(ui_font(FONT_SIZES["sm"]))
         painter.setPen(qcolor("text"))
         text_rect = rect.adjusted(14.0, 0.0, -14.0, 0.0)
@@ -196,3 +204,18 @@ class Badge(QFrame):
 
     def text(self) -> str:
         return self._label.text()
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Plakietka: to samo ziarno, co karty, tylko o pol poziomu bledsze."""
+        super().paintEvent(event)
+        painter = QPainter(self)
+        rect = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        if rect.width() >= 4.0 and rect.height() >= 4.0:
+            texture.paint_surface(
+                painter,
+                rect,
+                radius=max(0.0, float(RADIUS["md"]) - 1.0),
+                names=texture.SOFT_STACK,
+                opacity=0.7,
+            )
+        painter.end()

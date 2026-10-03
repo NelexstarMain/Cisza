@@ -10,10 +10,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QRectF, Qt, pyqtSignal
+from PyQt6.QtGui import QPainter
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLayout, QScrollArea, QVBoxLayout, QWidget
 
 from ..widgets import labels
+from ..widgets import texture
 from ..widgets.primitives import EmptyState
 from ..widgets.tiles import Toast
 
@@ -173,6 +175,24 @@ class Screen(QWidget):
         self._build()
 
     # ------------------------------------------------------------------ API
+    def paintEvent(self, event) -> None:  # noqa: N802 (API Qt)
+        """Pasek naglowka kazdego ekranu dostaje wlasny poziom ziarna.
+
+        Tlo okna ma stos ziarna; naglowek strony dokłada drobniejsze ziarno,
+        ktore wygasa w dol (maska gradientowa), wiec tytul strony siedzi na
+        "materiale", a nie na plaskiej czerni - i nie ma widocznego progu.
+        """
+        super().paintEvent(event)
+        painter = QPainter(self)
+        rect = QRectF(self.rect())
+        if rect.width() < 16.0 or rect.height() < 16.0:
+            painter.end()
+            return
+        band = QRectF(rect.left(), rect.top(), rect.width(), min(72.0, rect.height() * 0.3))
+        texture.paint_grain_fade(painter, band, "fine", fade="bottom", span=1.0, opacity=0.5)
+        texture.paint_grain_fade(painter, band, "clump", fade="bottom", span=0.7, opacity=0.4)
+        painter.end()
+
     def _build(self) -> None:
         """Budowa widoku (nadpisywana przez ekrany)."""
 
